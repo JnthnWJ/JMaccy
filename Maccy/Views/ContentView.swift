@@ -6,6 +6,7 @@ struct ContentView: View {
   @State private var appState = AppState.shared
   @State private var modifierFlags = ModifierFlags()
   @State private var scenePhase: ScenePhase = .background
+  @State private var shelfSearchExpanded = false
 
   @FocusState private var searchFocused: Bool
 
@@ -17,11 +18,16 @@ struct ContentView: View {
         VisualEffectView()
       }
 
-      KeyHandlingView(searchQuery: $appState.history.searchQuery, searchFocused: $searchFocused) {
+      KeyHandlingView(
+        searchQuery: $appState.history.searchQuery,
+        searchFocused: $searchFocused,
+        shelfSearchExpanded: $shelfSearchExpanded
+      ) {
         if appState.shelfModeEnabled {
           ShelfContentView(
             searchQuery: $appState.history.searchQuery,
-            searchFocused: $searchFocused
+            searchFocused: $searchFocused,
+            searchExpanded: $shelfSearchExpanded
           )
         } else {
           listContent
@@ -93,6 +99,7 @@ struct ContentView: View {
 private struct ShelfContentView: View {
   @Binding var searchQuery: String
   @FocusState.Binding var searchFocused: Bool
+  @Binding var searchExpanded: Bool
 
   @Environment(AppState.self) private var appState
   @Environment(ModifierFlags.self) private var modifierFlags
@@ -109,7 +116,11 @@ private struct ShelfContentView: View {
           .transition(.opacity.combined(with: .move(edge: .bottom)))
       }
 
-      ShelfTopStripView(searchQuery: $searchQuery, searchFocused: $searchFocused)
+      ShelfTopStripView(
+        searchQuery: $searchQuery,
+        searchFocused: $searchFocused,
+        searchExpanded: $searchExpanded
+      )
 
       ShelfCarouselView(items: shelfItems)
     }
@@ -119,16 +130,32 @@ private struct ShelfContentView: View {
     .onAppear {
       appState.shelfPreview.close()
       searchFocused = false
+      searchExpanded = false
       appState.navigator.highlightShelfFirst()
       appState.popup.needsResize = true
+      DispatchQueue.main.async {
+        if let window = NSApp.keyWindow {
+          window.makeFirstResponder(window.contentView)
+        }
+      }
     }
     .onChange(of: scenePhase) {
       if scenePhase == .active {
+        searchFocused = false
+        searchExpanded = false
         appState.navigator.isKeyboardNavigating = true
         if appState.navigator.leadHistoryItem == nil {
           appState.navigator.highlightShelfFirst()
         }
+        DispatchQueue.main.async {
+          if let window = NSApp.keyWindow {
+            window.makeFirstResponder(window.contentView)
+          }
+        }
       } else {
+        searchFocused = false
+        searchExpanded = false
+        searchQuery = ""
         modifierFlags.flags = []
         appState.navigator.isKeyboardNavigating = true
         appState.shelfPreview.close()
@@ -155,36 +182,127 @@ private struct ShelfContentView: View {
 }
 
 private struct ShelfTopStripView: View {
+  private struct TagChip: Identifiable {
+    let key: String
+    let color: Color
+
+    var id: String { key }
+  }
+
   @Binding var searchQuery: String
   @FocusState.Binding var searchFocused: Bool
+  @Binding var searchExpanded: Bool
 
   @Environment(AppState.self) private var appState
+  @Default(.showSearch) private var showSearch
   @State private var showActions = false
+  @State private var selectedTag = "shelf_chip_code"
 
   private let chips = [
-    "shelf_chip_clipboard",
-    "shelf_chip_links",
-    "shelf_chip_notes",
-    "shelf_chip_emails",
-    "shelf_chip_code"
+    TagChip(key: "shelf_chip_clipboard", color: .white.opacity(0.95)),
+    TagChip(key: "shelf_chip_links", color: .orange),
+    TagChip(key: "shelf_chip_notes", color: .yellow),
+    TagChip(key: "shelf_chip_emails", color: .green),
+    TagChip(key: "shelf_chip_code", color: .purple)
   ]
 
-  var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      HStack(spacing: 10) {
-        if appState.searchVisible {
-          SearchFieldView(placeholder: "search_placeholder", query: $searchQuery)
-            .focused($searchFocused)
-            .frame(maxWidth: 280)
-        }
+  private var isSearchExpanded: Bool {
+    showSearch && (searchExpanded || !searchQuery.isEmpty)
+  }
 
-        Spacer(minLength: 0)
+  private var searchWidth: CGFloat {
+    isSearchExpanded ? 340 : 26
+  }
+
+  private var sideRailWidth: CGFloat {
+    max(searchWidth, 64)
+  }
+
+  var body: some View {
+    HStack(spacing: 12) {
+      HStack {
+        if showSearch {
+          if isSearchExpanded {
+            ShelfSearchFieldView(
+              placeholder: "search_placeholder",
+              query: $searchQuery,
+              focused: searchFocused
+            ) {
+              appState.select()
+            }
+            .focused($searchFocused)
+            .frame(width: searchWidth, height: 40, alignment: .leading)
+          } else {
+            Button {
+              searchExpanded = true
+              DispatchQueue.main.async {
+                searchFocused = true
+              }
+            } label: {
+              Image(systemName: "magnifyingglass")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .frame(width: searchWidth, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+          }
+        }
+      }
+      .frame(width: sideRailWidth, alignment: .leading)
+      .animation(.easeInOut(duration: 0.15), value: isSearchExpanded)
+
+      GeometryReader { geo in
+        ScrollView(.horizontal, showsIndicators: false) {
+          HStack(spacing: 4) {
+            ForEach(chips) { chip in
+              Button {
+                selectedTag = chip.key
+              } label: {
+                HStack(spacing: 7) {
+                  Circle()
+                    .fill(chip.color)
+                    .frame(width: 7, height: 7)
+
+                  Text(LocalizedStringKey(chip.key))
+                    .font(.callout)
+                    .lineLimit(1)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .foregroundStyle(selectedTag == chip.key ? .primary : .secondary)
+                .background(
+                  selectedTag == chip.key
+                    ? Color.white.opacity(0.16)
+                    : Color.clear,
+                  in: Capsule()
+                )
+                .contentShape(Capsule())
+              }
+              .buttonStyle(.plain)
+            }
+          }
+          .frame(minWidth: geo.size.width, alignment: .center)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .center)
+
+      HStack(spacing: 12) {
+        Button {
+          // Placeholder UI to match the shelf controls in Paste.
+        } label: {
+          Image(systemName: "plus")
+            .font(.title3)
+            .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
 
         Button {
           showActions.toggle()
         } label: {
-          Image(systemName: "ellipsis.circle")
+          Image(systemName: "ellipsis")
             .font(.title3)
+            .foregroundStyle(.secondary)
         }
         .buttonStyle(.plain)
         .popover(isPresented: $showActions, arrowEdge: .top) {
@@ -197,20 +315,62 @@ private struct ShelfTopStripView: View {
           .padding(8)
         }
       }
-
-      ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: 8) {
-          ForEach(chips, id: \.self) { key in
-            Text(LocalizedStringKey(key))
-              .font(.caption)
-              .foregroundStyle(.secondary)
-              .padding(.horizontal, 12)
-              .padding(.vertical, 5)
-              .background(.white.opacity(0.25), in: Capsule())
-          }
-        }
+      .frame(width: sideRailWidth, alignment: .trailing)
+    }
+    .frame(height: 40)
+    .onChange(of: searchFocused) {
+      if !searchFocused && searchQuery.isEmpty {
+        searchExpanded = false
+      } else if searchFocused {
+        searchExpanded = true
       }
     }
+  }
+}
+
+private struct ShelfSearchFieldView: View {
+  let placeholder: LocalizedStringKey
+  @Binding var query: String
+  let focused: Bool
+  let onSubmit: () -> Void
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Image(systemName: "magnifyingglass")
+        .font(.title3)
+        .foregroundStyle(.secondary)
+
+      TextField(placeholder, text: $query)
+        .disableAutocorrection(true)
+        .lineLimit(1)
+        .textFieldStyle(.plain)
+        .onSubmit {
+          onSubmit()
+        }
+
+      if !query.isEmpty {
+        Button {
+          query = ""
+        } label: {
+          Image(systemName: "xmark.circle.fill")
+            .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+      } else {
+        Image(systemName: "line.3.horizontal.decrease")
+          .foregroundStyle(.secondary)
+      }
+    }
+    .padding(.horizontal, 14)
+    .frame(height: 40)
+    .background(.white.opacity(0.08), in: Capsule())
+    .overlay(
+      Capsule()
+        .strokeBorder(
+          focused ? Color.accentColor.opacity(0.95) : Color.white.opacity(0.22),
+          lineWidth: focused ? 2.5 : 1
+        )
+    )
   }
 }
 
