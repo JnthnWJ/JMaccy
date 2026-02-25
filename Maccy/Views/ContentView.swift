@@ -109,6 +109,17 @@ private struct ShelfContentView: View {
     appState.history.pinnedItems.filter(\.isVisible) + appState.history.unpinnedItems.filter(\.isVisible)
   }
 
+  private func defocusShelfSearch() {
+    guard searchFocused else { return }
+
+    searchFocused = false
+    DispatchQueue.main.async {
+      if let window = NSApp.keyWindow {
+        window.makeFirstResponder(window.contentView)
+      }
+    }
+  }
+
   var body: some View {
     VStack(spacing: 10) {
       if appState.shelfPreview.isOpen {
@@ -119,10 +130,14 @@ private struct ShelfContentView: View {
       ShelfTopStripView(
         searchQuery: $searchQuery,
         searchFocused: $searchFocused,
-        searchExpanded: $searchExpanded
+        searchExpanded: $searchExpanded,
+        onOutsideSearchInteraction: defocusShelfSearch
       )
 
-      ShelfCarouselView(items: shelfItems)
+      ShelfCarouselView(
+        items: shelfItems,
+        onOutsideSearchInteraction: defocusShelfSearch
+      )
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 14)
@@ -182,6 +197,11 @@ private struct ShelfContentView: View {
 }
 
 private struct ShelfTopStripView: View {
+  private enum TagPresentation {
+    case full
+    case dotOnly
+  }
+
   private struct TagChip: Identifiable {
     let key: String
     let color: Color
@@ -192,6 +212,7 @@ private struct ShelfTopStripView: View {
   @Binding var searchQuery: String
   @FocusState.Binding var searchFocused: Bool
   @Binding var searchExpanded: Bool
+  let onOutsideSearchInteraction: () -> Void
 
   @Environment(AppState.self) private var appState
   @Default(.showSearch) private var showSearch
@@ -210,101 +231,145 @@ private struct ShelfTopStripView: View {
     showSearch && (searchExpanded || !searchQuery.isEmpty)
   }
 
-  private var searchWidth: CGFloat {
-    isSearchExpanded ? 340 : 26
+  private var trailingActionsWidth: CGFloat {
+    44
   }
 
-  private var sideRailWidth: CGFloat {
-    max(searchWidth, 64)
+  private var trailingActionsInset: CGFloat {
+    trailingActionsWidth + 12
+  }
+
+  private var dotRailWidth: CGFloat {
+    CGFloat(chips.count) * 20
+  }
+
+  private func preferredExpandedSearchWidth(availableWidth: CGFloat) -> CGFloat {
+    let preferred = max(320, min(620, availableWidth - 260))
+    let maxAllowed = max(210, availableWidth - trailingActionsInset - dotRailWidth - 44)
+    return min(preferred, maxAllowed)
+  }
+
+  @ViewBuilder
+  private func tagView(for chip: TagChip, presentation: TagPresentation) -> some View {
+    let isSelected = selectedTag == chip.key
+
+    switch presentation {
+    case .full:
+      HStack(spacing: 7) {
+        Circle()
+          .fill(chip.color)
+          .frame(width: 7, height: 7)
+
+        Text(LocalizedStringKey(chip.key))
+          .font(.callout)
+          .lineLimit(1)
+      }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 6)
+      .foregroundStyle(isSelected ? .primary : .secondary)
+      .background(
+        isSelected ? Color.white.opacity(0.16) : Color.clear,
+        in: Capsule()
+      )
+      .contentShape(Capsule())
+    case .dotOnly:
+      Circle()
+        .fill(chip.color)
+        .frame(width: 12, height: 12)
+        .overlay {
+          Circle()
+            .strokeBorder(
+              isSelected ? Color.white.opacity(0.95) : Color.white.opacity(0),
+              lineWidth: 2
+            )
+            .padding(-3)
+        }
+        .contentShape(Circle())
+    }
   }
 
   var body: some View {
-    HStack(spacing: 12) {
-      HStack {
-        if showSearch {
-          if isSearchExpanded {
-            ShelfSearchFieldView(
-              placeholder: "search_placeholder",
-              query: $searchQuery,
-              focused: searchFocused
-            ) {
-              appState.select()
-            }
-            .focused($searchFocused)
-            .frame(width: searchWidth, height: 40, alignment: .leading)
-          } else {
-            Button {
-              searchExpanded = true
-              DispatchQueue.main.async {
-                searchFocused = true
+    GeometryReader { geo in
+      let tagPresentation: TagPresentation = isSearchExpanded ? .dotOnly : .full
+      let expandedSearchWidth = preferredExpandedSearchWidth(availableWidth: geo.size.width)
+
+      ZStack(alignment: .trailing) {
+        HStack(spacing: 12) {
+          if showSearch {
+            if isSearchExpanded {
+              ShelfSearchFieldView(
+                placeholder: "search_placeholder",
+                query: $searchQuery,
+                focused: searchFocused
+              ) {
+                appState.select()
               }
-            } label: {
-              Image(systemName: "magnifyingglass")
-                .font(.title3)
-                .foregroundStyle(.secondary)
-                .frame(width: searchWidth, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-          }
-        }
-      }
-      .frame(width: sideRailWidth, alignment: .leading)
-      .animation(.easeInOut(duration: 0.15), value: isSearchExpanded)
-
-      GeometryReader { geo in
-        ScrollView(.horizontal, showsIndicators: false) {
-          HStack(spacing: 4) {
-            ForEach(chips) { chip in
+              .focused($searchFocused)
+              .frame(width: expandedSearchWidth, height: 40)
+              .accessibilityIdentifier("shelf-search-field")
+            } else {
               Button {
-                selectedTag = chip.key
-              } label: {
-                HStack(spacing: 7) {
-                  Circle()
-                    .fill(chip.color)
-                    .frame(width: 7, height: 7)
-
-                  Text(LocalizedStringKey(chip.key))
-                    .font(.callout)
-                    .lineLimit(1)
+                searchExpanded = true
+                DispatchQueue.main.async {
+                  searchFocused = true
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .foregroundStyle(selectedTag == chip.key ? .primary : .secondary)
-                .background(
-                  selectedTag == chip.key
-                    ? Color.white.opacity(0.16)
-                    : Color.clear,
-                  in: Capsule()
-                )
-                .contentShape(Capsule())
+              } label: {
+                Image(systemName: "magnifyingglass")
+                  .font(.title3)
+                  .foregroundStyle(.secondary)
+                  .frame(width: 24, height: 40)
+                  .contentShape(Rectangle())
               }
               .buttonStyle(.plain)
+              .accessibilityIdentifier("shelf-search-toggle")
             }
           }
-          .frame(minWidth: geo.size.width, alignment: .center)
-        }
-      }
-      .frame(maxWidth: .infinity, alignment: .center)
 
-      HStack(spacing: 12) {
-        Button {
-          // Placeholder UI to match the shelf controls in Paste.
-        } label: {
-          Image(systemName: "plus")
-            .font(.title3)
-            .foregroundStyle(.secondary)
+          HStack(spacing: tagPresentation == .dotOnly ? 14 : 4) {
+            ForEach(chips) { chip in
+              Button {
+                onOutsideSearchInteraction()
+                selectedTag = chip.key
+              } label: {
+                tagView(for: chip, presentation: tagPresentation)
+              }
+              .buttonStyle(.plain)
+              .accessibilityIdentifier(
+                tagPresentation == .dotOnly
+                  ? "shelf-tag-dot-\(chip.key)"
+                  : "shelf-tag-full-\(chip.key)"
+              )
+            }
+          }
+
+          if !isSearchExpanded {
+            Button {
+              onOutsideSearchInteraction()
+              // Placeholder UI to match the shelf controls in Paste.
+            } label: {
+              Image(systemName: "plus")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .frame(height: 40)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("shelf-add-tag")
+          }
         }
-        .buttonStyle(.plain)
+        .padding(.trailing, trailingActionsInset)
+        .frame(maxWidth: .infinity, alignment: .center)
 
         Button {
+          onOutsideSearchInteraction()
           showActions.toggle()
         } label: {
           Image(systemName: "ellipsis")
             .font(.title3)
             .foregroundStyle(.secondary)
+            .frame(width: trailingActionsWidth, height: 40)
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("shelf-actions")
         .popover(isPresented: $showActions, arrowEdge: .top) {
           VStack(spacing: 2) {
             ForEach(appState.footer.items) { item in
@@ -315,13 +380,13 @@ private struct ShelfTopStripView: View {
           .padding(8)
         }
       }
-      .frame(width: sideRailWidth, alignment: .trailing)
+      .frame(maxWidth: .infinity, alignment: .trailing)
+      .animation(.easeInOut(duration: 0.18), value: isSearchExpanded)
     }
     .frame(height: 40)
+    .accessibilityIdentifier("shelf-top-strip")
     .onChange(of: searchFocused) {
-      if !searchFocused && searchQuery.isEmpty {
-        searchExpanded = false
-      } else if searchFocused {
+      if searchFocused {
         searchExpanded = true
       }
     }
@@ -344,6 +409,7 @@ private struct ShelfSearchFieldView: View {
         .disableAutocorrection(true)
         .lineLimit(1)
         .textFieldStyle(.plain)
+        .accessibilityIdentifier("shelf-search-input")
         .onSubmit {
           onSubmit()
         }
@@ -376,6 +442,7 @@ private struct ShelfSearchFieldView: View {
 
 private struct ShelfCarouselView: View {
   let items: [HistoryItemDecorator]
+  let onOutsideSearchInteraction: () -> Void
 
   @Environment(AppState.self) private var appState
 
@@ -390,7 +457,10 @@ private struct ShelfCarouselView: View {
           ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: 14) {
               ForEach(items) { item in
-                ShelfCardView(item: item)
+                ShelfCardView(
+                  item: item,
+                  onOutsideSearchInteraction: onOutsideSearchInteraction
+                )
                   .id(item.id)
               }
             }
@@ -423,6 +493,7 @@ private struct ShelfCarouselView: View {
 
 private struct ShelfCardView: View {
   @Bindable var item: HistoryItemDecorator
+  let onOutsideSearchInteraction: () -> Void
 
   @Environment(AppState.self) private var appState
 
@@ -502,10 +573,12 @@ private struct ShelfCardView: View {
         .strokeBorder(isSelected ? Color.accentColor : Color.white.opacity(0.28), lineWidth: isSelected ? 3 : 1)
     )
     .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+    .accessibilityIdentifier("shelf-card")
     .onAppear {
       item.ensureThumbnailImage()
     }
     .onTapGesture {
+      onOutsideSearchInteraction()
       if isSelected {
         Task {
           appState.history.select(item)

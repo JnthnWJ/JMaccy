@@ -6,6 +6,7 @@ import XCTest
 class MaccyUITests: XCTestCase {
   let app = XCUIApplication()
   let pasteboard = NSPasteboard.general
+  let appBundleId = "org.p0deje.Maccy"
 
   let copy1 = UUID().uuidString
   let copy2 = UUID().uuidString
@@ -48,6 +49,8 @@ class MaccyUITests: XCTestCase {
   override func setUp() {
     super.setUp()
 
+    setPopupLayoutMode("list")
+
     try? "Hello world".write(to: file1, atomically: true, encoding: .utf8)
     try? "Hello world".write(to: file2, atomically: true, encoding: .utf8)
 
@@ -61,6 +64,7 @@ class MaccyUITests: XCTestCase {
 
   override func tearDown() {
     super.tearDown()
+    setPopupLayoutMode("list")
     app.terminate()
   }
 
@@ -99,6 +103,95 @@ class MaccyUITests: XCTestCase {
     assertSearchFieldValue(copy2)
     assertExists(app.staticTexts[copy2])
     assertNotExists(items[copy1])
+  }
+
+  func testShelfStripCollapsedLayout() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    popUpWithMouse()
+
+    let strip = app.descendants(matching: .any)["shelf-top-strip"]
+    let searchToggle = app.descendants(matching: .any)["shelf-search-toggle"]
+    let firstFullTag = app.descendants(matching: .any)["shelf-tag-full-shelf_chip_clipboard"]
+    let addTag = app.descendants(matching: .any)["shelf-add-tag"]
+    let actions = app.descendants(matching: .any)["shelf-actions"]
+
+    assertExists(strip)
+    assertExists(searchToggle)
+    assertExists(firstFullTag)
+    assertExists(addTag)
+    assertExists(actions)
+
+    XCTAssertLessThan(searchToggle.frame.maxX, firstFullTag.frame.minX + 8)
+    XCTAssertGreaterThan(addTag.frame.minX, firstFullTag.frame.maxX - 8)
+    XCTAssertGreaterThan(actions.frame.minX, addTag.frame.maxX + 12)
+  }
+
+  func testShelfExpandedSearchShowsDotTags() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    popUpWithMouse()
+
+    app.descendants(matching: .any)["shelf-search-toggle"].click()
+
+    let searchField = app.descendants(matching: .any)["shelf-search-field"]
+    let fullTag = app.descendants(matching: .any)["shelf-tag-full-shelf_chip_clipboard"]
+    let dotTag = app.descendants(matching: .any)["shelf-tag-dot-shelf_chip_clipboard"]
+    let addTag = app.descendants(matching: .any)["shelf-add-tag"]
+    let actions = app.descendants(matching: .any)["shelf-actions"]
+
+    assertExists(searchField)
+    assertExists(dotTag)
+    assertNotExists(fullTag)
+    assertNotExists(addTag)
+    assertExists(actions)
+  }
+
+  func testShelfEscapeDefocusesThenCloses() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    popUpWithMouse()
+
+    app.descendants(matching: .any)["shelf-search-toggle"].click()
+    search(copy2)
+
+    let searchInput = app.textFields["shelf-search-input"]
+    assertExists(searchInput)
+    XCTAssertEqual(searchInput.value as? String, copy2)
+
+    app.typeKey(.escape, modifierFlags: [])
+    assertExists(app.descendants(matching: .any)["shelf-top-strip"])
+    assertExists(app.descendants(matching: .any)["shelf-search-field"])
+
+    app.typeKey("z", modifierFlags: [])
+    waitForSearch()
+    XCTAssertEqual(searchInput.value as? String, copy2)
+
+    app.typeKey(.escape, modifierFlags: [])
+    assertPopupDismissed()
+  }
+
+  func testShelfCardClickDefocusesSearch() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    popUpWithMouse()
+
+    app.descendants(matching: .any)["shelf-search-toggle"].click()
+    search(copy2)
+
+    let searchInput = app.textFields["shelf-search-input"]
+    assertExists(searchInput)
+
+    let cards = app.descendants(matching: .any).matching(identifier: "shelf-card")
+    let secondCard = cards.element(boundBy: 1)
+    assertExists(secondCard)
+    secondCard.click()
+
+    assertExists(app.descendants(matching: .any)["shelf-top-strip"])
+
+    app.typeKey("z", modifierFlags: [])
+    waitForSearch()
+    XCTAssertEqual(searchInput.value as? String, copy2)
   }
 
   func testSearchFiles() {
@@ -573,6 +666,19 @@ class MaccyUITests: XCTestCase {
     // NOTE: This is a hack and is flaky.
     // Ideally we should wait for a proper condition to detect that search has settled down.
     usleep(500000)  // wait for search throttle
+  }
+
+  private func skipIfShelfUnavailable() throws {
+    if #unavailable(macOS 26.0) {
+      throw XCTSkip("Shelf mode is unavailable on this macOS version.")
+    }
+  }
+
+  private func setPopupLayoutMode(_ mode: String) {
+    let defaults = UserDefaults(suiteName: appBundleId)
+    defaults?.set(mode, forKey: "popupLayoutMode")
+    defaults?.synchronize()
+    usleep(300000)
   }
 
   private func assertExists(_ element: XCUIElement) {

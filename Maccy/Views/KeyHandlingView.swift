@@ -230,6 +230,17 @@ struct KeyHandlingView<Content: View>: View {
       appState.popup.needsResize = true
       return true
     case .close:
+      if shelfMode, searchFocused {
+        searchFocused = false
+        shelfSearchExpanded = true
+        DispatchQueue.main.async {
+          if let window = NSApp.keyWindow {
+            window.makeFirstResponder(window.contentView)
+          }
+        }
+        return true
+      }
+
       if shelfMode, appState.shelfPreview.isOpen {
         appState.shelfPreview.close()
         appState.popup.needsResize = true
