@@ -104,6 +104,10 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
   }
 
   var shelfHeaderColor: Color {
+    if let iconHue = applicationImage.shelfHeaderHue {
+      return Color(hue: iconHue, saturation: 0.84, brightness: 0.95)
+    }
+
     let source = item.application ?? application ?? item.title
     let hash = Self.stableHash(source)
     let hue = Double(hash % 360) / 360.0

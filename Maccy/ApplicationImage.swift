@@ -10,12 +10,31 @@ class ApplicationImage {
 
   let bundleIdentifier: String?
   private var image: NSImage?
+  private var headerHue: Double?
   private var lastChecked: Date?
   private var eventSource: (any DispatchSourceFileSystemObject)?
 
   init(bundleIdentifier: String?, image: NSImage? = nil) {
     self.bundleIdentifier = bundleIdentifier
     self.image = image
+  }
+
+  var shelfHeaderHue: Double? {
+    guard bundleIdentifier != nil else {
+      return nil
+    }
+
+    if let headerHue {
+      return headerHue
+    }
+
+    _ = nsImage
+    guard let image else {
+      return nil
+    }
+
+    headerHue = image.prominentHue()
+    return headerHue
   }
 
   var nsImage: NSImage {
@@ -61,10 +80,12 @@ class ApplicationImage {
               print("Deleted", appURL.path)
               source.cancel()
               self.image = nil
+              self.headerHue = nil
             } else if event.contains(.write) {
               // File was modified. Fetch new icon
               print("Modified", appURL.path)
               self.image = NSWorkspace.shared.icon(forFile: appURL.path)
+              self.headerHue = nil
             }
           }
         }
