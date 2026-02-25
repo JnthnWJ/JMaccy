@@ -12,6 +12,9 @@ struct KeyHandlingView<Content: View>: View {
   var body: some View {
     content()
       .onKeyPress { _ in
+        let keyChord = KeyChord(NSApp.currentEvent)
+        let shelfMode = appState.shelfModeEnabled
+
         // Unfortunately, key presses don't allow access to
         // key code and don't properly work with multiple inputs,
         // so pressing ⌘, on non-English layout doesn't open
@@ -26,7 +29,7 @@ struct KeyHandlingView<Content: View>: View {
           }
         }
 
-        switch KeyChord(NSApp.currentEvent) {
+        switch keyChord {
         case .clearHistory:
           if let item = appState.footer.items.first(where: { $0.title == "clear" }),
              item.confirmation != nil,
@@ -78,6 +81,9 @@ struct KeyHandlingView<Content: View>: View {
 
           return .handled
         case .moveToNext:
+          guard !shelfMode else {
+            return .ignored
+          }
           guard NSApp.characterPickerWindow == nil else {
             return .ignored
           }
@@ -85,6 +91,9 @@ struct KeyHandlingView<Content: View>: View {
           appState.navigator.highlightNext()
           return .handled
         case .moveToLast:
+          guard !shelfMode else {
+            return .ignored
+          }
           guard NSApp.characterPickerWindow == nil else {
             return .ignored
           }
@@ -92,6 +101,9 @@ struct KeyHandlingView<Content: View>: View {
           appState.navigator.highlightLast()
           return .handled
         case .moveToPrevious:
+          guard !shelfMode else {
+            return .ignored
+          }
           guard NSApp.characterPickerWindow == nil else {
             return .ignored
           }
@@ -99,6 +111,9 @@ struct KeyHandlingView<Content: View>: View {
           appState.navigator.highlightPrevious()
           return .handled
         case .moveToFirst:
+          guard !shelfMode else {
+            return .ignored
+          }
           guard NSApp.characterPickerWindow == nil else {
             return .ignored
           }
@@ -106,6 +121,9 @@ struct KeyHandlingView<Content: View>: View {
           appState.navigator.highlightFirst()
           return .handled
         case .extendToNext:
+          guard !shelfMode else {
+            return .ignored
+          }
           guard NSApp.characterPickerWindow == nil else {
             return .ignored
           }
@@ -115,6 +133,9 @@ struct KeyHandlingView<Content: View>: View {
           appState.navigator.extendHighlightToNext()
           return .handled
         case .extendToLast:
+          guard !shelfMode else {
+            return .ignored
+          }
           guard NSApp.characterPickerWindow == nil else {
             return .ignored
           }
@@ -124,6 +145,9 @@ struct KeyHandlingView<Content: View>: View {
           appState.navigator.extendHighlightToLast()
           return .handled
         case .extendToPrevious:
+          guard !shelfMode else {
+            return .ignored
+          }
           guard NSApp.characterPickerWindow == nil else {
             return .ignored
           }
@@ -133,6 +157,9 @@ struct KeyHandlingView<Content: View>: View {
           appState.navigator.extendHighlightToPrevious()
           return .handled
         case .extendToFirst:
+          guard !shelfMode else {
+            return .ignored
+          }
           guard NSApp.characterPickerWindow == nil else {
             return .ignored
           }
@@ -144,16 +171,46 @@ struct KeyHandlingView<Content: View>: View {
         case .openPreferences:
           appState.openPreferences()
           return .handled
+        case .focusSearch:
+          searchFocused = true
+          return .handled
         case .pinOrUnpin:
           appState.togglePin()
           return .handled
         case .selectCurrentItem:
           appState.select()
           return .handled
+        case .moveToLeft:
+          guard shelfMode, !searchFocused else {
+            return .ignored
+          }
+          appState.navigator.highlightShelfPrevious()
+          return .handled
+        case .moveToRight:
+          guard shelfMode, !searchFocused else {
+            return .ignored
+          }
+          appState.navigator.highlightShelfNext()
+          return .handled
+        case .toggleShelfPreview:
+          guard shelfMode, !searchFocused else {
+            return .ignored
+          }
+          appState.shelfPreview.toggle()
+          appState.popup.needsResize = true
+          return .handled
         case .close:
+          if shelfMode, appState.shelfPreview.isOpen {
+            appState.shelfPreview.close()
+            appState.popup.needsResize = true
+            return .handled
+          }
           appState.popup.close()
           return .handled
         case .togglePreview:
+          guard !shelfMode else {
+            return .ignored
+          }
           appState.preview.togglePreview()
           return .handled
         default:

@@ -3,9 +3,35 @@ import Defaults
 import Foundation
 import Observation
 import Sauce
+import SwiftUI
 
 @Observable
 class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
+  enum ShelfCardType {
+    case text
+    case link
+    case image
+    case file
+    case richText
+
+    var key: String {
+      switch self {
+      case .text:
+        return "shelf_type_text"
+      case .link:
+        return "shelf_type_link"
+      case .image:
+        return "shelf_type_image"
+      case .file:
+        return "shelf_type_file"
+      case .richText:
+        return "shelf_type_rich_text"
+      }
+    }
+  }
+
+  private static let relativeDateFormatter = RelativeDateTimeFormatter()
+
   static func == (lhs: HistoryItemDecorator, rhs: HistoryItemDecorator) -> Bool {
     return lhs.id == rhs.id
   }
@@ -52,6 +78,59 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
 
   var isPinned: Bool { item.pin != nil }
   var isUnpinned: Bool { item.pin == nil }
+
+  var shelfCardType: ShelfCardType {
+    if hasImage {
+      return .image
+    }
+    if !item.fileURLs.isEmpty {
+      return .file
+    }
+    if item.rtfData != nil || item.htmlData != nil {
+      return .richText
+    }
+
+    let value = item.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if let url = URL(string: value), url.scheme != nil, url.host != nil {
+      return .link
+    }
+    return .text
+  }
+
+  var shelfTypeKey: String { shelfCardType.key }
+
+  var shelfRelativeTime: String {
+    return Self.relativeDateFormatter.localizedString(for: item.lastCopiedAt, relativeTo: Date())
+  }
+
+  var shelfHeaderColor: Color {
+    let source = item.application ?? application ?? item.title
+    let hash = Self.stableHash(source)
+    let hue = Double(hash % 360) / 360.0
+    return Color(hue: hue, saturation: 0.84, brightness: 0.95)
+  }
+
+  var shelfExcerpt: String {
+    if hasImage {
+      return ""
+    }
+
+    return item.previewableText
+      .replacingOccurrences(of: "\n", with: " ")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .shortened(to: 220)
+  }
+
+  var shelfMetadata: String {
+    if let image = item.image {
+      return "\(Int(image.size.width)) x \(Int(image.size.height))"
+    }
+    if !item.fileURLs.isEmpty {
+      return item.fileURLs.count == 1 ? "1 file" : "\(item.fileURLs.count) files"
+    }
+
+    return "\(item.previewableText.count) characters"
+  }
 
   func hash(into hasher: inout Hasher) {
     // We need to hash title and attributedTitle, so SwiftUI knows it needs to update the view if they chage
@@ -205,5 +284,14 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
         self.synchronizeItemTitle()
       }
     }
+  }
+
+  private static func stableHash(_ value: String) -> UInt64 {
+    var hash: UInt64 = 14_695_981_039_346_656_037
+    for byte in value.utf8 {
+      hash ^= UInt64(byte)
+      hash = hash &* 1_099_511_628_211
+    }
+    return hash
   }
 }

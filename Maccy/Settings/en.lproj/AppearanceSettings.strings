@@ -1,4 +1,9 @@
 "Title" = "Appearance";
+"Layout" = "Layout:";
+"LayoutList" = "List";
+"LayoutShelf" = "Shelf";
+"LayoutTooltip" = "Choose popup layout style.\nDefault: List.";
+"LayoutShelfUnavailable" = "Shelf layout requires macOS 26 or newer.";
 "PopupAt" = "Popup at:";
 "PopupAtCursor" = "Cursor";
 "PopupAtMenuBarIcon" = "Menu icon";

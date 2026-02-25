@@ -4,6 +4,7 @@ import Defaults
 import Settings
 
 struct AppearanceSettingsPane: View {
+  @Default(.popupLayoutMode) private var popupLayoutMode
   @Default(.popupPosition) private var popupAt
   @Default(.popupScreen) private var popupScreen
   @Default(.pinTo) private var pinTo
@@ -48,8 +49,36 @@ struct AppearanceSettingsPane: View {
     return formatter
   }()
 
+  private var shelfAvailable: Bool {
+    if #available(macOS 26.0, *) {
+      return true
+    }
+    return false
+  }
+
   var body: some View {
     Settings.Container(contentWidth: 650) {
+      Settings.Section(label: { Text("Layout", tableName: "AppearanceSettings") }) {
+        Picker("", selection: $popupLayoutMode) {
+          Text(PopupLayoutMode.list.description)
+            .tag(PopupLayoutMode.list)
+
+          if shelfAvailable {
+            Text(PopupLayoutMode.shelf.description)
+              .tag(PopupLayoutMode.shelf)
+          }
+        }
+        .labelsHidden()
+        .frame(width: 141, alignment: .leading)
+        .help(Text("LayoutTooltip", tableName: "AppearanceSettings"))
+
+        if !shelfAvailable {
+          Text("LayoutShelfUnavailable", tableName: "AppearanceSettings")
+            .controlSize(.small)
+            .foregroundStyle(.gray)
+        }
+      }
+
       Settings.Section(label: { Text("PopupAt", tableName: "AppearanceSettings") }) {
         HStack {
           Picker("", selection: $popupAt) {
@@ -77,6 +106,8 @@ struct AppearanceSettingsPane: View {
             .disabled(windowPosition == _windowPosition.defaultValue)
           }
         }
+        .disabled(popupLayoutMode != .list)
+        .opacity(popupLayoutMode == .list ? 1 : 0.5)
       }
 
       Settings.Section(label: { Text("PinTo", tableName: "AppearanceSettings") }) {
@@ -182,6 +213,11 @@ struct AppearanceSettingsPane: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
       screens = NSScreen.screens
+    }
+    .onAppear {
+      if !shelfAvailable {
+        popupLayoutMode = .list
+      }
     }
   }
 

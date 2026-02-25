@@ -25,7 +25,11 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
         updateItems(search.search(string: searchQuery, within: all))
 
         if searchQuery.isEmpty {
-          AppState.shared.navigator.select(item: unpinnedItems.first)
+          if AppState.shared.shelfModeEnabled {
+            AppState.shared.navigator.highlightShelfFirst()
+          } else {
+            AppState.shared.navigator.select(item: unpinnedItems.first)
+          }
         } else {
           AppState.shared.navigator.highlightFirst()
         }

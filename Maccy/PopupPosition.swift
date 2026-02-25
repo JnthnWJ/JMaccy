@@ -67,3 +67,19 @@ enum PopupPosition: String, CaseIterable, Identifiable, CustomStringConvertible,
     return point
   }
 }
+
+enum PopupLayoutMode: String, CaseIterable, Identifiable, CustomStringConvertible, Defaults.Serializable {
+  case list
+  case shelf
+
+  var id: Self { self }
+
+  var description: String {
+    switch self {
+    case .list:
+      return NSLocalizedString("LayoutList", tableName: "AppearanceSettings", comment: "")
+    case .shelf:
+      return NSLocalizedString("LayoutShelf", tableName: "AppearanceSettings", comment: "")
+    }
+  }
+}

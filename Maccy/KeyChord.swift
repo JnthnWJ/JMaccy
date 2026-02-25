@@ -31,15 +31,19 @@ enum KeyChord: CaseIterable {
   case moveToLast
   case moveToPrevious
   case moveToFirst
+  case moveToLeft
+  case moveToRight
   case extendToNext
   case extendToLast
   case extendToPrevious
   case extendToFirst
+  case focusSearch
   case openPreferences
   case pinOrUnpin
   case selectCurrentItem
   case close
   case togglePreview
+  case toggleShelfPreview
   case unknown
 
   init(_ event: NSEvent?) {
@@ -82,6 +86,10 @@ enum KeyChord: CaseIterable {
       self = .deleteOneCharFromSearch
     case (.w, [.control]):
       self = .deleteLastWordFromSearch
+    case (.leftArrow, []):
+      self = .moveToLeft
+    case (.rightArrow, []):
+      self = .moveToRight
     case (.downArrow, [.shift]),
          (.n, [.control, .shift]):
       self = AppState.shared.multiSelectionEnabled ? .extendToNext : .moveToNext
@@ -114,6 +122,8 @@ enum KeyChord: CaseIterable {
       self = .moveToFirst
     case (KeyChord.pinKey, KeyChord.pinModifiers):
       self = .pinOrUnpin
+    case (.f, [.command]):
+      self = .focusSearch
     case (.comma, [.command]):
       self = .openPreferences
     case (.return, _),
@@ -123,6 +133,8 @@ enum KeyChord: CaseIterable {
       self = .close
     case (KeyChord.previewKey, KeyChord.previewModifiers):
       self = .togglePreview
+    case (.space, []):
+      self = .toggleShelfPreview
     case (_, _) where !modifierFlags.isDisjoint(with: [.command, .control, .option]):
       self = .ignored
     default:

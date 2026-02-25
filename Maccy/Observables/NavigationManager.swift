@@ -51,6 +51,10 @@ class NavigationManager { // swiftlint:disable:this type_body_length
     return isManualMultiSelect || selection.count > 1
   }
 
+  private var shelfVisibleHistoryItems: [HistoryItemDecorator] {
+    return history.pinnedItems.filter(\.isVisible) + history.unpinnedItems.filter(\.isVisible)
+  }
+
   var hoverSelectionWhileKeyboardNavigating: UUID?
   var isKeyboardNavigating: Bool = true {
     didSet {
@@ -196,6 +200,11 @@ class NavigationManager { // swiftlint:disable:this type_body_length
   }
 
   func highlightFirst() {
+    if AppState.shared.shelfModeEnabled {
+      highlightShelfFirst()
+      return
+    }
+
     if let item = history.firstVisibleItem {
       selectFromKeyboardNavigation(item: item)
     } else {
@@ -203,7 +212,59 @@ class NavigationManager { // swiftlint:disable:this type_body_length
     }
   }
 
+  func highlightShelfFirst() {
+    selectFromKeyboardNavigation(item: shelfVisibleHistoryItems.first)
+  }
+
+  func highlightShelfNext(allowCycle: Bool = false) {
+    guard let lead = leadSelection else {
+      highlightShelfFirst()
+      return
+    }
+
+    let items = shelfVisibleHistoryItems
+    guard let index = items.firstIndex(where: { $0.id == lead }) else {
+      highlightShelfFirst()
+      return
+    }
+
+    let next = items.index(after: index)
+    if next < items.endIndex {
+      selectFromKeyboardNavigation(item: items[next])
+    } else if allowCycle {
+      highlightShelfFirst()
+    }
+  }
+
+  func highlightShelfPrevious(allowCycle: Bool = false) {
+    guard let lead = leadSelection else {
+      highlightShelfFirst()
+      return
+    }
+
+    let items = shelfVisibleHistoryItems
+    guard let index = items.firstIndex(where: { $0.id == lead }) else {
+      highlightShelfFirst()
+      return
+    }
+
+    if index > items.startIndex {
+      selectFromKeyboardNavigation(item: items[items.index(before: index)])
+    } else if allowCycle, let last = items.last {
+      selectFromKeyboardNavigation(item: last)
+    }
+  }
+
+  func highlightShelfLast() {
+    selectFromKeyboardNavigation(item: shelfVisibleHistoryItems.last)
+  }
+
   func highlightPrevious() {
+    if AppState.shared.shelfModeEnabled {
+      highlightShelfPrevious()
+      return
+    }
+
     guard let lead = leadSelection else { return }
 
     if let historyItem = history.firstVisibleItem(where: { $0.id == lead }) {
@@ -224,6 +285,11 @@ class NavigationManager { // swiftlint:disable:this type_body_length
   }
 
   func highlightNext(allowCycle: Bool = false) {
+    if AppState.shared.shelfModeEnabled {
+      highlightShelfNext(allowCycle: allowCycle)
+      return
+    }
+
     guard let lead = leadSelection else { return }
 
     if leadSelection == history.pasteStack?.id {
@@ -252,6 +318,11 @@ class NavigationManager { // swiftlint:disable:this type_body_length
   }
 
   func highlightLast() {
+    if AppState.shared.shelfModeEnabled {
+      highlightShelfLast()
+      return
+    }
+
     guard let lead = leadSelection else { return }
 
     if let historyItem = history.firstVisibleItem(where: { $0.id == lead }) {

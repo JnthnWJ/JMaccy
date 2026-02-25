@@ -28,3 +28,15 @@
 "system_settings_pane" = "Privacy & Security settings";
 "system_preferences_name" = "System Preferences";
 "system_preferences_pane" = "Security & Privacy preferences";
+"shelf_chip_clipboard" = "Clipboard";
+"shelf_chip_links" = "Useful Links";
+"shelf_chip_notes" = "Important Notes";
+"shelf_chip_emails" = "Email Templates";
+"shelf_chip_code" = "Code Snippets";
+"shelf_no_selection" = "Select a card to preview";
+"shelf_no_results" = "No clipboard items";
+"shelf_type_text" = "Text";
+"shelf_type_link" = "Link";
+"shelf_type_image" = "Image";
+"shelf_type_file" = "File";
+"shelf_type_rich_text" = "Rich Text";

@@ -66,6 +66,7 @@ enum ResizingMode {
 class SlideoutController {
   let logger = Logger(label: "org.p0deje.Maccy")
   private static let animationDuration = 0.25
+  private var enabled: Bool { !AppState.shared.shelfModeEnabled }
 
   let onContentResize: (CGFloat) -> Void
   let onSlideoutResize: (CGFloat) -> Void
@@ -145,6 +146,12 @@ class SlideoutController {
   }
 
   func togglePreview(trigger: SlideoutToggleTrigger = .manual) {
+    guard enabled else {
+      cancelAutoOpen()
+      state = .closed
+      return
+    }
+
     if !state.isOpen {
       let navigator = AppState.shared.navigator
       guard navigator.leadHistoryItem != nil || navigator.pasteStackSelected else { return }
@@ -201,6 +208,8 @@ class SlideoutController {
   }
 
   func startResize(mode: ResizingMode) {
+    guard enabled else { return }
+
     logger.info("Starting resize with mode \(mode)")
     resizingMode = mode
     contentWidth = contentResizeWidth
@@ -208,6 +217,8 @@ class SlideoutController {
   }
 
   func endResize() {
+    guard enabled else { return }
+
     logger.info("Ended resize. Mode was \(resizingMode)")
     switch resizingMode {
     case .none:
@@ -221,6 +232,12 @@ class SlideoutController {
   }
 
   func startAutoOpen() {
+    guard enabled else {
+      cancelAutoOpen()
+      state = .closed
+      return
+    }
+
     cancelAutoOpen()
 
     guard autoOpenEnabled else { return }

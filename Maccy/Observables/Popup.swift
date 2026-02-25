@@ -22,6 +22,7 @@ class Popup {
   static let verticalPadding: CGFloat = 5
   static let horizontalPadding: CGFloat = 5
   static let minimumPreviewHeight: CGFloat = 150
+  static let minimumShelfHeight: CGFloat = 260
 
   // Radius used for items inset by the padding. Ensures they visually have the same curvature
   // as the menu.
@@ -73,11 +74,14 @@ class Popup {
   }
 
   func open(height: CGFloat, at popupPosition: PopupPosition = Defaults[.popupPosition]) {
-    AppState.shared.appDelegate?.panel.open(height: height, at: popupPosition)
+    AppState.shared.shelfPreview.close()
+    let panelHeight = AppState.shared.shelfModeEnabled ? Self.minimumShelfHeight : height
+    AppState.shared.appDelegate?.panel.open(height: panelHeight, at: popupPosition)
   }
 
   func reset() {
     state = .toggle
+    AppState.shared.shelfPreview.close()
     KeyboardShortcuts.enable(.popup)
   }
 
@@ -92,6 +96,12 @@ class Popup {
   func preferredHeight(for newHeight: CGFloat) -> CGFloat {
     var height = newHeight
 
+    if AppState.shared.shelfModeEnabled {
+      height = max(height, Self.minimumShelfHeight)
+      height = min(height, Defaults[.windowSize].height)
+      return height
+    }
+
     var minimumHeight = 0.0
     // If the preview is non-empty make sure the window accomodates for it to be visible.
     if AppState.shared.preview.state.isOpen && AppState.shared.navigator.leadSelection != nil {
@@ -105,7 +115,11 @@ class Popup {
   }
 
   func resize(height: CGFloat) {
-    self.height = height + headerHeight + extraTopHeight + extraBottomHeight + footerHeight
+    if AppState.shared.shelfModeEnabled {
+      self.height = height
+    } else {
+      self.height = height + headerHeight + extraTopHeight + extraBottomHeight + footerHeight
+    }
     AppState.shared.appDelegate?.panel.verticallyResize(to: preferredHeight(for: self.height))
     needsResize = false
   }

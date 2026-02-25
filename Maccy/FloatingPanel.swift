@@ -4,12 +4,17 @@ import SwiftUI
 // An NSPanel subclass that implements floating panel traits.
 // https://stackoverflow.com/questions/46023769/how-to-show-a-window-without-stealing-focus-on-macos
 class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
+  private var shelfWidthRatio: CGFloat { 0.88 }
+  private var shelfBottomInset: CGFloat { 24 }
+  private var shelfHorizontalInset: CGFloat { 16 }
+  private var shelfMaxHeightRatio: CGFloat { 0.65 }
+
   var isPresented: Bool = false
   var statusBarButton: NSStatusBarButton?
   let onClose: () -> Void
 
   override var isMovable: Bool {
-    get { Defaults[.popupPosition] != .statusItem }
+    get { !AppState.shared.shelfModeEnabled && Defaults[.popupPosition] != .statusItem }
     set {}
   }
 
@@ -57,10 +62,27 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
         .ignoresSafeArea()
         .gesture(DragGesture()
           .onEnded { _ in
-            self.saveWindowPosition()
+            if !AppState.shared.shelfModeEnabled {
+              self.saveWindowPosition()
+            }
         })
     )
     contentView?.layer?.cornerRadius = Popup.cornerRadius + Popup.horizontalPadding
+  }
+
+  private func shelfFrame(height: CGFloat) -> NSRect? {
+    guard let screenFrame = NSScreen.forPopup?.visibleFrame else {
+      return nil
+    }
+
+    let maxWidth = max(420, screenFrame.width - shelfHorizontalInset * 2)
+    let minWidth = min(maxWidth, 720)
+    let width = min(max(screenFrame.width * shelfWidthRatio, minWidth), maxWidth)
+    let maxHeight = screenFrame.height * shelfMaxHeightRatio
+    let finalHeight = min(max(height, Popup.minimumShelfHeight), maxHeight)
+    let originX = screenFrame.midX - width / 2
+    let originY = screenFrame.minY + shelfBottomInset
+    return NSRect(x: originX, y: originY, width: width, height: finalHeight)
   }
 
   func toggle(height: CGFloat, at popupPosition: PopupPosition = Defaults[.popupPosition]) {
@@ -72,9 +94,20 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
   }
 
   func open(height: CGFloat, at popupPosition: PopupPosition = Defaults[.popupPosition]) {
-    let size = Defaults[.windowSize]
-    setContentSize(NSSize(width: min(frame.width, size.width), height: min(height, size.height)))
-    setFrameOrigin(popupPosition.origin(size: frame.size, statusBarButton: statusBarButton))
+    if AppState.shared.shelfModeEnabled {
+      styleMask.remove(.resizable)
+      isMovableByWindowBackground = false
+      if let frame = shelfFrame(height: height) {
+        setFrame(frame, display: true)
+      }
+    } else {
+      styleMask.insert(.resizable)
+      isMovableByWindowBackground = true
+      let size = Defaults[.windowSize]
+      setContentSize(NSSize(width: min(frame.width, size.width), height: min(height, size.height)))
+      setFrameOrigin(popupPosition.origin(size: frame.size, statusBarButton: statusBarButton))
+    }
+
     orderFrontRegardless()
     makeKey()
     isPresented = true
@@ -87,10 +120,20 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
   }
 
   func verticallyResize(to newHeight: CGFloat) {
+    if AppState.shared.shelfModeEnabled, let newFrame = shelfFrame(height: newHeight) {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.2
+        animator().setFrame(newFrame, display: true)
+      }
+      return
+    }
+
     var newSize = frame.size
     newSize.height = newHeight
     var newOrigin = frame.origin
-    newOrigin.y += (frame.height - newSize.height)
+    if !AppState.shared.shelfModeEnabled {
+      newOrigin.y += (frame.height - newSize.height)
+    }
 
     NSAnimationContext.runAnimationGroup { (context) in
       context.duration = 0.2
@@ -106,6 +149,8 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
   }
 
   func saveWindowPosition() {
+    guard !AppState.shared.shelfModeEnabled else { return }
+
     if let screenFrame = screen?.visibleFrame {
       // Only store the size of the window without the preview
       let width = AppState.shared.preview.contentWidth
@@ -117,11 +162,15 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
   }
 
   func saveWindowFrame(frame: NSRect) {
+    guard !AppState.shared.shelfModeEnabled else { return }
+
     Defaults[.windowSize] = frame.size
     saveWindowPosition()
   }
 
   func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+    guard !AppState.shared.shelfModeEnabled else { return frame.size }
+
     let preview = AppState.shared.preview
 
     if inLiveResize && preview.resizingMode == .none {
@@ -161,23 +210,28 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
   }
 
   func windowWillMove(_ notification: Notification) {
+    guard !AppState.shared.shelfModeEnabled else { return }
     determinePreviewPlacement()
   }
 
   func windowDidMove(_ notification: Notification) {
+    guard !AppState.shared.shelfModeEnabled else { return }
     determinePreviewPlacement()
   }
 
   func windowWillStartLiveResize(_ notification: Notification) {
+    guard !AppState.shared.shelfModeEnabled else { return }
     AppState.shared.preview.cancelAutoOpen()
   }
 
   func windowDidEndLiveResize(_ notification: Notification) {
+    guard !AppState.shared.shelfModeEnabled else { return }
     AppState.shared.preview.startAutoOpen()
     AppState.shared.preview.endResize()
   }
 
   func windowDidBecomeKey(_ notification: Notification) {
+    guard !AppState.shared.shelfModeEnabled else { return }
     AppState.shared.preview.enableAutoOpen()
 
     if AppState.shared.navigator.leadHistoryItem != nil {
@@ -186,6 +240,7 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
   }
 
   func windowDidResignKey(_ notification: Notification) {
+    guard !AppState.shared.shelfModeEnabled else { return }
     AppState.shared.preview.disableAutoOpen()
   }
 

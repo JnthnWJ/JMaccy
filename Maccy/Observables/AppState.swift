@@ -5,6 +5,23 @@ import Settings
 import SwiftUI
 
 @Observable
+class ShelfPreview {
+  var isOpen: Bool = false
+
+  func open() {
+    isOpen = true
+  }
+
+  func close() {
+    isOpen = false
+  }
+
+  func toggle() {
+    isOpen.toggle()
+  }
+}
+
+@Observable
 class AppState: Sendable {
   static let shared = AppState(history: History.shared, footer: Footer())
 
@@ -16,6 +33,18 @@ class AppState: Sendable {
   var footer: Footer
   var navigator: NavigationManager
   var preview: SlideoutController
+  var shelfPreview = ShelfPreview()
+
+  var effectivePopupLayoutMode: PopupLayoutMode {
+    if #available(macOS 26.0, *) {
+      return Defaults[.popupLayoutMode]
+    }
+    return .list
+  }
+
+  var shelfModeEnabled: Bool {
+    return effectivePopupLayoutMode == .shelf
+  }
 
   var searchVisible: Bool {
     if !Defaults[.showSearch] { return false }
