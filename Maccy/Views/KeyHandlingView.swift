@@ -104,9 +104,8 @@ struct KeyHandlingView<Content: View>: View {
 
       return true
     case .moveToNext:
-      if shelfMode {
-        appState.navigator.highlightShelfNext()
-        return true
+      guard !shelfMode else {
+        return false
       }
       guard NSApp.characterPickerWindow == nil else {
         return false
@@ -115,9 +114,8 @@ struct KeyHandlingView<Content: View>: View {
       appState.navigator.highlightNext()
       return true
     case .moveToLast:
-      if shelfMode {
-        appState.navigator.highlightShelfLast()
-        return true
+      guard !shelfMode else {
+        return false
       }
       guard NSApp.characterPickerWindow == nil else {
         return false
@@ -126,9 +124,8 @@ struct KeyHandlingView<Content: View>: View {
       appState.navigator.highlightLast()
       return true
     case .moveToPrevious:
-      if shelfMode {
-        appState.navigator.highlightShelfPrevious()
-        return true
+      guard !shelfMode else {
+        return false
       }
       guard NSApp.characterPickerWindow == nil else {
         return false
@@ -137,9 +134,8 @@ struct KeyHandlingView<Content: View>: View {
       appState.navigator.highlightPrevious()
       return true
     case .moveToFirst:
-      if shelfMode {
-        appState.navigator.highlightShelfFirst()
-        return true
+      guard !shelfMode else {
+        return false
       }
       guard NSApp.characterPickerWindow == nil else {
         return false
