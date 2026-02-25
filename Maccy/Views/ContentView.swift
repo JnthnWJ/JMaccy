@@ -113,7 +113,7 @@ private struct ShelfContentView: View {
 
       ShelfCarouselView(items: shelfItems)
     }
-    .padding(.horizontal, 18)
+    .padding(.horizontal, 8)
     .padding(.vertical, 14)
     .animation(.easeInOut(duration: 0.16), value: appState.shelfPreview.isOpen)
     .onAppear {
@@ -148,11 +148,8 @@ private struct ShelfContentView: View {
             if appState.popup.needsResize {
               appState.popup.resize(height: geo.size.height)
             }
-          }
+        }
       }
-    }
-    .onMouseMove {
-      appState.navigator.isKeyboardNavigating = false
     }
   }
 }
@@ -230,15 +227,20 @@ private struct ShelfCarouselView: View {
           .frame(maxWidth: .infinity, minHeight: 180, alignment: .center)
       } else {
         ScrollViewReader { proxy in
-          ScrollView(.horizontal) {
+          ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: 14) {
               ForEach(items) { item in
                 ShelfCardView(item: item)
                   .id(item.id)
               }
             }
-            .padding(.horizontal, 2)
-            .padding(.bottom, 2)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 10)
+          }
+          .frame(height: 248)
+          .background(alignment: .topLeading) {
+            ShelfWheelBridge()
+              .frame(width: 0, height: 0)
           }
           .onAppear {
             if let selectedId = appState.navigator.leadSelection {
@@ -255,7 +257,7 @@ private struct ShelfCarouselView: View {
         }
       }
     }
-    .frame(minHeight: 230)
+    .frame(minHeight: 248)
   }
 }
 
@@ -340,14 +342,144 @@ private struct ShelfCardView: View {
         .strokeBorder(isSelected ? Color.accentColor : Color.white.opacity(0.28), lineWidth: isSelected ? 3 : 1)
     )
     .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
-    .hoverSelectionId(item.id)
     .onAppear {
       item.ensureThumbnailImage()
     }
     .onTapGesture {
-      Task {
-        appState.history.select(item)
+      if isSelected {
+        Task {
+          appState.history.select(item)
+        }
+      } else {
+        appState.navigator.select(item: item)
       }
+    }
+  }
+}
+
+private struct ShelfWheelBridge: NSViewRepresentable {
+  func makeCoordinator() -> Coordinator {
+    Coordinator()
+  }
+
+  func makeNSView(context: Context) -> BridgeView {
+    let view = BridgeView()
+    view.onAttach = { [weak coordinator = context.coordinator, weak view] in
+      guard let coordinator, let view else { return }
+      coordinator.attach(to: view)
+    }
+    return view
+  }
+
+  func updateNSView(_ nsView: BridgeView, context: Context) {
+    nsView.onAttach?()
+  }
+
+  static func dismantleNSView(_ nsView: BridgeView, coordinator: Coordinator) {
+    coordinator.detach()
+  }
+
+  final class BridgeView: NSView {
+    var onAttach: (() -> Void)?
+
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      onAttach?()
+    }
+
+    override func viewDidMoveToSuperview() {
+      super.viewDidMoveToSuperview()
+      onAttach?()
+    }
+  }
+
+  final class Coordinator {
+    private weak var scrollView: NSScrollView?
+    private var monitor: Any?
+
+    deinit {
+      detach()
+    }
+
+    func attach(to view: NSView) {
+      guard let scrollView = findScrollView(from: view) else { return }
+
+      self.scrollView = scrollView
+      scrollView.hasHorizontalScroller = false
+      scrollView.hasVerticalScroller = false
+
+      installMonitor()
+    }
+
+    func detach() {
+      if let monitor {
+        NSEvent.removeMonitor(monitor)
+        self.monitor = nil
+      }
+      scrollView = nil
+    }
+
+    private func installMonitor() {
+      guard monitor == nil else { return }
+
+      monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+        guard let self,
+              let scrollView = self.scrollView,
+              let documentView = scrollView.documentView,
+              let window = scrollView.window else {
+          return event
+        }
+
+        if event.window !== window {
+          return event
+        }
+
+        let pointInScrollView = scrollView.convert(event.locationInWindow, from: nil)
+        guard scrollView.bounds.contains(pointInScrollView) else {
+          return event
+        }
+
+        // Keep native horizontal trackpad gestures.
+        if abs(event.scrollingDeltaX) > 0.01 {
+          return event
+        }
+
+        let deltaY = event.scrollingDeltaY
+        guard abs(deltaY) > 0.01 else {
+          return event
+        }
+
+        let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 14
+        let translatedDeltaX = -deltaY * multiplier
+        let visibleWidth = scrollView.contentView.bounds.width
+        let maxX = max(0, documentView.bounds.width - visibleWidth)
+        guard maxX > 0 else {
+          return event
+        }
+
+        var origin = scrollView.contentView.bounds.origin
+        let newX = min(max(origin.x + translatedDeltaX, 0), maxX)
+        guard newX != origin.x else {
+          return event
+        }
+
+        origin.x = newX
+        scrollView.contentView.setBoundsOrigin(origin)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+
+        return nil
+      }
+    }
+
+    private func findScrollView(from view: NSView) -> NSScrollView? {
+      var current: NSView? = view
+      while let candidate = current {
+        if let scrollView = candidate.enclosingScrollView {
+          return scrollView
+        }
+        current = candidate.superview
+      }
+      return nil
     }
   }
 }

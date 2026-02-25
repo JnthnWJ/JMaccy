@@ -181,13 +181,13 @@ struct KeyHandlingView<Content: View>: View {
           appState.select()
           return .handled
         case .moveToLeft:
-          guard shelfMode, !searchFocused else {
+          guard shelfMode else {
             return .ignored
           }
           appState.navigator.highlightShelfPrevious()
           return .handled
         case .moveToRight:
-          guard shelfMode, !searchFocused else {
+          guard shelfMode else {
             return .ignored
           }
           appState.navigator.highlightShelfNext()

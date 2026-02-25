@@ -4,9 +4,9 @@ import SwiftUI
 // An NSPanel subclass that implements floating panel traits.
 // https://stackoverflow.com/questions/46023769/how-to-show-a-window-without-stealing-focus-on-macos
 class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
-  private var shelfWidthRatio: CGFloat { 0.88 }
+  private var shelfWidthRatio: CGFloat { 0.98 }
   private var shelfBottomInset: CGFloat { 24 }
-  private var shelfHorizontalInset: CGFloat { 16 }
+  private var shelfHorizontalInset: CGFloat { 8 }
   private var shelfMaxHeightRatio: CGFloat { 0.65 }
 
   var isPresented: Bool = false
@@ -75,9 +75,11 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
       return nil
     }
 
-    let maxWidth = max(420, screenFrame.width - shelfHorizontalInset * 2)
-    let minWidth = min(maxWidth, 720)
-    let width = min(max(screenFrame.width * shelfWidthRatio, minWidth), maxWidth)
+    let computedWidth = min(
+      screenFrame.width * shelfWidthRatio,
+      screenFrame.width - shelfHorizontalInset * 2
+    )
+    let width = max(420, computedWidth)
     let maxHeight = screenFrame.height * shelfMaxHeightRatio
     let finalHeight = min(max(height, Popup.minimumShelfHeight), maxHeight)
     let originX = screenFrame.midX - width / 2
