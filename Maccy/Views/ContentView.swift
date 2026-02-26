@@ -844,10 +844,17 @@ private struct ShelfCardView: View {
 
         Group {
           if let image = item.thumbnailImage {
-            Image(nsImage: image)
-              .resizable()
-              .scaledToFill()
-              .frame(maxWidth: .infinity, maxHeight: .infinity)
+            GeometryReader { geometry in
+              let containerWidth = geometry.size.width
+              let safeImageWidth = max(image.size.width, 1)
+              let renderedImageHeight = containerWidth * image.size.height / safeImageWidth
+
+              Image(nsImage: image)
+                .resizable()
+                // Keep the top of screenshots visible; crop from the bottom when needed.
+                .frame(width: containerWidth, height: renderedImageHeight, alignment: .top)
+                .frame(width: containerWidth, height: geometry.size.height, alignment: .top)
+            }
               .clipped()
           } else {
             VStack(alignment: .leading, spacing: 8) {
