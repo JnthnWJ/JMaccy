@@ -40,6 +40,10 @@ class MaccyUITests: XCTestCase {
     app.descendants(matching: .any).matching(identifier: "copy-history-item")
   }
 
+  var shelfCards: XCUIElementQuery {
+    app.buttons.matching(identifier: "shelf-card")
+  }
+
   var itemTitles: [String] {
     items.allElementsBoundByIndex
       .sorted(by: { $0.frame.origin.y < $1.frame.origin.y })
@@ -182,7 +186,7 @@ class MaccyUITests: XCTestCase {
     let searchInput = app.textFields["shelf-search-input"]
     assertExists(searchInput)
 
-    let cards = app.descendants(matching: .any).matching(identifier: "shelf-card")
+    let cards = shelfCards
     let secondCard = cards.element(boundBy: 1)
     assertExists(secondCard)
     secondCard.click()
@@ -192,6 +196,57 @@ class MaccyUITests: XCTestCase {
     app.typeKey("z", modifierFlags: [])
     waitForSearch()
     XCTAssertEqual(searchInput.value as? String, copy2)
+  }
+
+  func testShelfCardClickSelectsExactCardAcrossDirections() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    let seeded = seedShelfCopies(count: 14)
+    popUpWithMouse()
+
+    let cards = shelfCards.allElementsBoundByIndex
+    XCTAssertGreaterThanOrEqual(cards.count, 11)
+
+    clickShelfCard(at: 1)
+    assertShelfCardSelected(1)
+
+    let fartherVisibleIndex = max(2, maxHittableShelfCardIndex() ?? 2)
+    clickShelfCard(at: fartherVisibleIndex)
+    assertShelfCardSelected(fartherVisibleIndex)
+
+    clickShelfCard(at: 2)
+    assertShelfCardSelected(2)
+
+    // First click selects; second click on the same card copies/pastes that card.
+    clickShelfCard(at: 2)
+    let expected = Array(seeded.reversed())[2]
+    assertPasteboardStringEquals(expected)
+  }
+
+  func testShelfCardClickAfterHorizontalScrollCanReturnToEarlierCard() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    _ = seedShelfCopies(count: 18)
+    popUpWithMouse()
+
+    clickShelfCard(at: 1)
+    assertShelfCardSelected(1)
+
+    let initialMax = maxHittableShelfCardIndex() ?? 1
+    dragShelfCarousel(toLeft: true)
+    dragShelfCarousel(toLeft: true)
+
+    let scrolledMax = maxHittableShelfCardIndex() ?? initialMax
+    XCTAssertGreaterThanOrEqual(scrolledMax, initialMax)
+
+    clickShelfCard(at: scrolledMax)
+    assertShelfCardSelected(scrolledMax)
+
+    dragShelfCarousel(toLeft: false)
+    dragShelfCarousel(toLeft: false)
+
+    clickShelfCard(at: 1)
+    assertShelfCardSelected(1)
   }
 
   func testSearchFiles() {
@@ -660,6 +715,46 @@ class MaccyUITests: XCTestCase {
       app.typeKey("\($0)", modifierFlags: [])
     }
     waitForSearch()
+  }
+
+  private func clickShelfCard(at index: Int) {
+    let card = shelfCards.element(boundBy: index)
+    assertExists(card)
+    expectation(for: NSPredicate(format: "isHittable = 1"), evaluatedWith: card)
+    waitForExpectations(timeout: 3)
+    card.click()
+  }
+
+  private func assertShelfCardSelected(_ index: Int) {
+    let card = shelfCards.element(boundBy: index)
+    assertExists(card)
+    expectation(for: NSPredicate(format: "value = 'selected'"), evaluatedWith: card)
+    waitForExpectations(timeout: 3)
+  }
+
+  private func maxHittableShelfCardIndex() -> Int? {
+    let cards = shelfCards.allElementsBoundByIndex
+    return cards.indices.filter { cards[$0].isHittable }.max()
+  }
+
+  private func dragShelfCarousel(toLeft: Bool) {
+    let carousel = app.descendants(matching: .any)["shelf-carousel"]
+    assertExists(carousel)
+
+    let startX = toLeft ? 0.85 : 0.15
+    let endX = toLeft ? 0.15 : 0.85
+    let start = carousel.coordinate(withNormalizedOffset: CGVector(dx: startX, dy: 0.5))
+    let end = carousel.coordinate(withNormalizedOffset: CGVector(dx: endX, dy: 0.5))
+    start.press(forDuration: 0.05, thenDragTo: end)
+    usleep(250000)
+  }
+
+  private func seedShelfCopies(count: Int) -> [String] {
+    let values = (1...count).map {
+      "shelf-click-\($0)-\(UUID().uuidString.prefix(8))"
+    }
+    values.forEach(copyToClipboard)
+    return values
   }
 
   private func waitForSearch() {

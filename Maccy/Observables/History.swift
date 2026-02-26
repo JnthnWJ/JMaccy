@@ -21,6 +21,8 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
   var searchQuery: String = "" {
     didSet {
+      guard oldValue != searchQuery else { return }
+
       throttler.throttle { [self] in
         updateItems(search.search(string: searchQuery, within: all))
 

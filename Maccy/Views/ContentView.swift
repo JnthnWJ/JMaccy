@@ -441,10 +441,34 @@ private struct ShelfSearchFieldView: View {
 }
 
 private struct ShelfCarouselView: View {
+  private enum SelectionSource {
+    case pointer
+    case keyboardOrProgrammatic
+  }
+
   let items: [HistoryItemDecorator]
   let onOutsideSearchInteraction: () -> Void
 
   @Environment(AppState.self) private var appState
+  @State private var pendingSelectionSource: SelectionSource = .keyboardOrProgrammatic
+  @State private var pendingPointerSelectionId: UUID?
+
+  private func handleCardTap(id: UUID) {
+    onOutsideSearchInteraction()
+
+    guard let tappedItem = items.first(where: { $0.id == id }) else { return }
+
+    if appState.navigator.leadSelection == id {
+      Task {
+        appState.history.select(tappedItem)
+      }
+      return
+    }
+
+    pendingSelectionSource = .pointer
+    pendingPointerSelectionId = id
+    appState.navigator.select(item: tappedItem)
+  }
 
   var body: some View {
     Group {
@@ -459,7 +483,8 @@ private struct ShelfCarouselView: View {
               ForEach(items) { item in
                 ShelfCardView(
                   item: item,
-                  onOutsideSearchInteraction: onOutsideSearchInteraction
+                  isSelected: appState.navigator.leadSelection == item.id,
+                  onCardTap: handleCardTap
                 )
                   .id(item.id)
               }
@@ -468,6 +493,7 @@ private struct ShelfCarouselView: View {
             .padding(.vertical, 10)
           }
           .frame(height: 248)
+          .accessibilityIdentifier("shelf-carousel")
           .background(alignment: .topLeading) {
             ShelfWheelBridge()
               .frame(width: 0, height: 0)
@@ -477,11 +503,28 @@ private struct ShelfCarouselView: View {
               proxy.scrollTo(selectedId, anchor: .center)
             }
           }
-          .onChange(of: appState.navigator.leadSelection) {
-            if let selectedId = appState.navigator.leadSelection {
-              withAnimation(.easeInOut(duration: 0.15)) {
-                proxy.scrollTo(selectedId, anchor: .center)
-              }
+          .task(id: appState.navigator.leadSelection) {
+            guard let selectedId = appState.navigator.leadSelection else {
+              pendingSelectionSource = .keyboardOrProgrammatic
+              pendingPointerSelectionId = nil
+              return
+            }
+
+            let selectionSource = pendingSelectionSource
+            pendingSelectionSource = .keyboardOrProgrammatic
+
+            if selectionSource == .pointer,
+               pendingPointerSelectionId == selectedId {
+              pendingPointerSelectionId = nil
+              return
+            }
+            pendingPointerSelectionId = nil
+
+            try? await Task.sleep(for: .milliseconds(10))
+            guard !Task.isCancelled else { return }
+
+            withAnimation(.easeInOut(duration: 0.15)) {
+              proxy.scrollTo(selectedId, anchor: .center)
             }
           }
         }
@@ -493,99 +536,93 @@ private struct ShelfCarouselView: View {
 
 private struct ShelfCardView: View {
   @Bindable var item: HistoryItemDecorator
-  let onOutsideSearchInteraction: () -> Void
-
-  @Environment(AppState.self) private var appState
-
-  private var isSelected: Bool {
-    appState.navigator.leadSelection == item.id
-  }
+  let isSelected: Bool
+  let onCardTap: (UUID) -> Void
 
   var body: some View {
-    VStack(spacing: 0) {
-      HStack(alignment: .top, spacing: 8) {
-        VStack(alignment: .leading, spacing: 2) {
-          Text(LocalizedStringKey(item.shelfTypeKey))
-            .font(.headline)
-            .lineLimit(1)
-          Text(item.shelfRelativeTime)
-            .font(.caption)
-            .opacity(0.85)
-        }
-
-        Spacer(minLength: 0)
-
-        AppImageView(appImage: item.applicationImage, size: NSSize(width: 22, height: 22))
-
-        if item.isPinned {
-          Image(systemName: "pin.fill")
-            .font(.caption)
-        }
-      }
-      .foregroundStyle(.white)
-      .padding(10)
-      .background(item.shelfHeaderColor)
-
-      Group {
-        if let image = item.thumbnailImage {
-          Image(nsImage: image)
-            .resizable()
-            .scaledToFill()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipped()
-        } else {
-          VStack(alignment: .leading, spacing: 8) {
-            Text(item.title.isEmpty ? item.text.shortened(to: 80) : item.title.shortened(to: 80))
+    Button {
+      onCardTap(item.id)
+    } label: {
+      VStack(spacing: 0) {
+        HStack(alignment: .top, spacing: 8) {
+          VStack(alignment: .leading, spacing: 2) {
+            Text(LocalizedStringKey(item.shelfTypeKey))
               .font(.headline)
-              .lineLimit(2)
-
-            if !item.shelfExcerpt.isEmpty {
-              Text(item.shelfExcerpt)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .lineLimit(5)
-            }
-
-            Spacer(minLength: 0)
+              .lineLimit(1)
+            Text(item.shelfRelativeTime)
+              .font(.caption)
+              .opacity(0.85)
           }
-          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-          .padding(10)
-        }
-      }
-      .background(Color(nsColor: .windowBackgroundColor).opacity(0.86))
 
-      HStack {
-        Text(item.shelfMetadata)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-        Spacer(minLength: 0)
+          Spacer(minLength: 0)
+
+          AppImageView(appImage: item.applicationImage, size: NSSize(width: 22, height: 22))
+
+          if item.isPinned {
+            Image(systemName: "pin.fill")
+              .font(.caption)
+          }
+        }
+        .foregroundStyle(.white)
+        .padding(10)
+        .background(item.shelfHeaderColor)
+
+        Group {
+          if let image = item.thumbnailImage {
+            Image(nsImage: image)
+              .resizable()
+              .scaledToFill()
+              .frame(maxWidth: .infinity, maxHeight: .infinity)
+              .clipped()
+          } else {
+            VStack(alignment: .leading, spacing: 8) {
+              Text(item.title.isEmpty ? item.text.shortened(to: 80) : item.title.shortened(to: 80))
+                .font(.headline)
+                .lineLimit(2)
+
+              if !item.shelfExcerpt.isEmpty {
+                Text(item.shelfExcerpt)
+                  .font(.body)
+                  .foregroundStyle(.secondary)
+                  .lineLimit(5)
+              }
+
+              Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(10)
+          }
+        }
+        .background(Color(nsColor: .windowBackgroundColor).opacity(0.86))
+
+        HStack {
+          Text(item.shelfMetadata)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+          Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color(nsColor: .windowBackgroundColor).opacity(0.9))
       }
-      .padding(.horizontal, 10)
-      .padding(.vertical, 8)
-      .background(Color(nsColor: .windowBackgroundColor).opacity(0.9))
+      .frame(width: 260, height: 220)
+      .background(.ultraThinMaterial)
+      .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+      .overlay(
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+          .strokeBorder(isSelected ? Color.accentColor : Color.white.opacity(0.28), lineWidth: isSelected ? 3 : 1)
+      )
+      .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+      .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
-    .frame(width: 260, height: 220)
-    .background(.ultraThinMaterial)
-    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    .overlay(
-      RoundedRectangle(cornerRadius: 16, style: .continuous)
-        .strokeBorder(isSelected ? Color.accentColor : Color.white.opacity(0.28), lineWidth: isSelected ? 3 : 1)
-    )
-    .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+    .buttonStyle(.plain)
     .accessibilityIdentifier("shelf-card")
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(Text(verbatim: item.title.isEmpty ? item.text.shortened(to: 80) : item.title.shortened(to: 80)))
+    .accessibilityValue(Text(verbatim: isSelected ? "selected" : "unselected"))
     .onAppear {
       item.ensureThumbnailImage()
-    }
-    .onTapGesture {
-      onOutsideSearchInteraction()
-      if isSelected {
-        Task {
-          appState.history.select(item)
-        }
-      } else {
-        appState.navigator.select(item: item)
-      }
     }
   }
 }
