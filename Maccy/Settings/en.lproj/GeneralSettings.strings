@@ -10,6 +10,10 @@
 "DeleteTooltip" = "Shortcut key to delete history item.\nDefault: ⌫.";
 "ShowPreview" = "Preview:";
 "ShowPreviewTooltip" = "Show preview with additional information.\nDefault: Space.";
+"ShelfPreviewImageEditor" = "Shelf image editor:";
+"ShelfPreviewImageEditorNotSet" = "No app selected";
+"ShelfPreviewImageEditorChoose" = "Choose App…";
+"ShelfPreviewImageEditorReset" = "Reset";
 "Behavior" = "Behavior:";
 "PasteAutomatically" = "Paste automatically";
 "PasteWithoutFormatting" = "Paste without formatting";

@@ -74,14 +74,14 @@ class Popup {
   }
 
   func open(height: CGFloat, at popupPosition: PopupPosition = Defaults[.popupPosition]) {
-    AppState.shared.shelfPreview.close()
+    AppState.shared.shelfPreview.closeAll()
     let panelHeight = AppState.shared.shelfModeEnabled ? Self.minimumShelfHeight : height
     AppState.shared.appDelegate?.panel.open(height: panelHeight, at: popupPosition)
   }
 
   func reset() {
     state = .toggle
-    AppState.shared.shelfPreview.close()
+    AppState.shared.shelfPreview.closeAll()
     KeyboardShortcuts.enable(.popup)
   }
 

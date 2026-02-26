@@ -340,6 +340,47 @@ class MaccyUITests: XCTestCase {
     assertShelfCardSelected(1)
   }
 
+  func testShelfPreviewPopupOpensAndCloses() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    popUpWithMouse()
+
+    app.typeKey(.space, modifierFlags: [])
+    assertExists(app.descendants(matching: .any)["shelf-preview-popup"])
+
+    app.typeKey(.escape, modifierFlags: [])
+    assertNotExists(app.descendants(matching: .any)["shelf-preview-popup"])
+  }
+
+  func testShelfTextEditorSaveUpdatesPreview() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    popUpWithMouse()
+
+    app.typeKey(.space, modifierFlags: [])
+    let preview = app.descendants(matching: .any)["shelf-preview-popup"]
+    assertExists(preview)
+
+    let editButton = app.buttons["shelf-preview-edit"]
+    assertExists(editButton)
+    editButton.click()
+
+    let editor = app.descendants(matching: .any)["shelf-text-editor"]
+    assertExists(editor)
+
+    let textView = editor.descendants(matching: .textView).firstMatch
+    assertExists(textView)
+    textView.click()
+    app.typeKey("a", modifierFlags: .command)
+    app.typeKey(.delete, modifierFlags: [])
+    textView.typeText("edited from shelf test")
+
+    app.buttons["shelf-text-editor-save"].click()
+    assertNotExists(editor)
+
+    assertExists(app.staticTexts["edited from shelf test"])
+  }
+
   func testSearchFiles() {
     copyToClipboard(file2)
     copyToClipboard(file1)
@@ -745,7 +786,12 @@ class MaccyUITests: XCTestCase {
   }
 
   private func waitUntilPoppedUp() {
-    if !app.staticTexts.firstMatch.waitForExistence(timeout: 3) {
+    let popupReady = NSPredicate { _, _ in
+      self.app.descendants(matching: .any)["shelf-top-strip"].exists
+        || self.app.descendants(matching: .any)["copy-history-item"].exists
+    }
+    let expectation = XCTNSPredicateExpectation(predicate: popupReady, object: nil)
+    if XCTWaiter.wait(for: [expectation], timeout: 3) != .completed {
       XCTFail("Maccy did not pop up")
     }
   }

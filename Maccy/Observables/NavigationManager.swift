@@ -39,6 +39,10 @@ class NavigationManager { // swiftlint:disable:this type_body_length
       } else {
         preview.cancelAutoOpen()
       }
+
+      if AppState.shared.shelfModeEnabled {
+        AppState.shared.shelfPreview.updateLeadSelection()
+      }
     }
   }
 

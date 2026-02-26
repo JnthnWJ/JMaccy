@@ -1,5 +1,6 @@
-import XCTest
+import AppKit
 import Defaults
+import XCTest
 @testable import Maccy
 
 @MainActor
@@ -8,6 +9,7 @@ class HistoryTests: XCTestCase {
   let savedSortBy = Defaults[.sortBy]
   let savedPopupLayoutMode = Defaults[.popupLayoutMode]
   let savedSearchMode = Defaults[.searchMode]
+  let savedShelfPreviewImageEditorBundleID = Defaults[.shelfPreviewImageEditorBundleID]
   let history = History.shared
 
   override func setUp() {
@@ -22,6 +24,7 @@ class HistoryTests: XCTestCase {
     Defaults[.sortBy] = .firstCopiedAt
     Defaults[.popupLayoutMode] = .list
     Defaults[.searchMode] = .exact
+    Defaults[.shelfPreviewImageEditorBundleID] = nil
   }
 
   override func tearDown() {
@@ -30,6 +33,7 @@ class HistoryTests: XCTestCase {
     Defaults[.sortBy] = savedSortBy
     Defaults[.popupLayoutMode] = savedPopupLayoutMode
     Defaults[.searchMode] = savedSearchMode
+    Defaults[.shelfPreviewImageEditorBundleID] = savedShelfPreviewImageEditorBundleID
   }
 
   func testDefaultIsEmpty() {
@@ -360,6 +364,63 @@ class HistoryTests: XCTestCase {
     XCTAssertEqual(AppState.shared.navigator.leadHistoryItem?.id, middle.id)
   }
 
+  func testUpdateTextContentReplacesItemText() {
+    let item = history.add(historyItem("foo"))
+
+    let didUpdate = history.updateTextContent(for: item.id, newValue: "updated text")
+
+    XCTAssertTrue(didUpdate)
+    XCTAssertEqual(item.item.previewableText, "updated text")
+    XCTAssertEqual(item.item.text, "updated text")
+    XCTAssertEqual(item.item.contents.filter { $0.type == NSPasteboard.PasteboardType.string.rawValue }.count, 1)
+  }
+
+  func testUpdateTextContentDoesNotMutateSystemClipboard() {
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    pasteboard.setString("clipboard-sentinel", forType: .string)
+
+    let item = history.add(historyItem("foo"))
+    _ = history.updateTextContent(for: item.id, newValue: "edited value")
+
+    XCTAssertEqual(pasteboard.string(forType: .string), "clipboard-sentinel")
+  }
+
+  func testReplaceImageContentUpdatesImageDimensions() {
+    let original = NSImage(size: NSSize(width: 40, height: 40))
+    original.lockFocus()
+    NSColor.blue.setFill()
+    NSBezierPath(rect: NSRect(x: 0, y: 0, width: 40, height: 40)).fill()
+    original.unlockFocus()
+
+    let replacement = NSImage(size: NSSize(width: 120, height: 48))
+    replacement.lockFocus()
+    NSColor.red.setFill()
+    NSBezierPath(rect: NSRect(x: 0, y: 0, width: 120, height: 48)).fill()
+    replacement.unlockFocus()
+
+    let item = history.add(historyItem(original))
+    let didReplace = history.replaceImageContent(
+      for: item.id,
+      imageData: replacement.tiffRepresentation ?? Data(),
+      type: .tiff
+    )
+
+    XCTAssertTrue(didReplace)
+    XCTAssertEqual(item.item.image?.size, replacement.size)
+  }
+
+  func testShelfPreviewImageEditorBundleIDRoundtrip() {
+    let previous = Defaults[.shelfPreviewImageEditorBundleID]
+    Defaults[.shelfPreviewImageEditorBundleID] = "com.apple.Preview"
+
+    XCTAssertEqual(Defaults[.shelfPreviewImageEditorBundleID], "com.apple.Preview")
+
+    Defaults[.shelfPreviewImageEditorBundleID] = nil
+    XCTAssertNil(Defaults[.shelfPreviewImageEditorBundleID])
+    Defaults[.shelfPreviewImageEditorBundleID] = previous
+  }
+
   private func historyItem(_ value: String) -> HistoryItem {
     let contents = [
       HistoryItemContent(
@@ -370,6 +431,21 @@ class HistoryTests: XCTestCase {
     let item = HistoryItem()
     Storage.shared.context.insert(item)
     item.contents = contents
+    item.numberOfCopies = 1
+    item.title = item.generateTitle()
+
+    return item
+  }
+
+  private func historyItem(_ image: NSImage) -> HistoryItem {
+    let item = HistoryItem()
+    Storage.shared.context.insert(item)
+    item.contents = [
+      HistoryItemContent(
+        type: NSPasteboard.PasteboardType.tiff.rawValue,
+        value: image.tiffRepresentation
+      )
+    ]
     item.numberOfCopies = 1
     item.title = item.generateTitle()
 

@@ -308,6 +308,81 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   }
 
   @MainActor
+  @discardableResult
+  func updateTextContent(for itemID: UUID, newValue: String) -> Bool {
+    guard let item = all.first(where: { $0.id == itemID }) else {
+      return false
+    }
+
+    let plainTextType = NSPasteboard.PasteboardType.string.rawValue
+    let removableTypes: Set<String> = [
+      NSPasteboard.PasteboardType.string.rawValue,
+      NSPasteboard.PasteboardType.rtf.rawValue,
+      NSPasteboard.PasteboardType.html.rawValue
+    ]
+    item.item.contents.removeAll { removableTypes.contains($0.type) }
+
+    if let data = newValue.data(using: .utf8) {
+      if let existingIndex = item.item.contents.firstIndex(where: { $0.type == plainTextType }) {
+        item.item.contents[existingIndex].value = data
+      } else {
+        item.item.contents.append(
+          HistoryItemContent(type: plainTextType, value: data)
+        )
+      }
+    }
+
+    item.item.title = item.item.generateTitle()
+    item.title = item.item.title
+    item.attributedTitle = nil
+
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+
+    applyCurrentFilters()
+    AppState.shared.popup.needsResize = true
+
+    return true
+  }
+
+  @MainActor
+  @discardableResult
+  func replaceImageContent(
+    for itemID: UUID,
+    imageData: Data,
+    type: NSPasteboard.PasteboardType = .png
+  ) -> Bool {
+    guard let item = all.first(where: { $0.id == itemID }) else {
+      return false
+    }
+
+    let removableTypes: Set<String> = [
+      NSPasteboard.PasteboardType.tiff.rawValue,
+      NSPasteboard.PasteboardType.png.rawValue,
+      NSPasteboard.PasteboardType.jpeg.rawValue,
+      NSPasteboard.PasteboardType.heic.rawValue
+    ]
+    item.item.contents.removeAll { removableTypes.contains($0.type) }
+    item.item.contents.append(
+      HistoryItemContent(type: type.rawValue, value: imageData)
+    )
+
+    item.item.title = item.item.generateTitle()
+    item.title = item.item.title
+    item.attributedTitle = nil
+    item.cleanupImages()
+    item.ensureThumbnailImage()
+
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+
+    applyCurrentFilters()
+    AppState.shared.popup.needsResize = true
+
+    return true
+  }
+
+  @MainActor
   private func cleanup(_ item: HistoryItemDecorator) {
     item.cleanupImages()
   }

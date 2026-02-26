@@ -239,9 +239,11 @@ struct KeyHandlingView<Content: View>: View {
         return true
       }
 
-      if shelfMode, appState.shelfPreview.isOpen {
-        appState.shelfPreview.close()
-        appState.popup.needsResize = true
+      if shelfMode, appState.shelfPreview.closeEditorIfOpen() {
+        return true
+      }
+
+      if shelfMode, appState.shelfPreview.closePreviewIfOpen() {
         return true
       }
       appState.popup.close()
@@ -249,7 +251,6 @@ struct KeyHandlingView<Content: View>: View {
     case .togglePreview:
       if shelfMode {
         appState.shelfPreview.toggle()
-        appState.popup.needsResize = true
       } else {
         appState.preview.togglePreview()
       }

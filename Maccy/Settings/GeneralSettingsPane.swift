@@ -12,11 +12,13 @@ struct GeneralSettingsPane: View {
   )
 
   @Default(.searchMode) private var searchMode
+  @Default(.shelfPreviewImageEditorBundleID) private var shelfPreviewImageEditorBundleID
 
   @State private var copyModifier = HistoryItemAction.copy.modifierFlags.description
   @State private var pasteModifier = HistoryItemAction.paste.modifierFlags.description
   @State private var pasteWithoutFormatting = HistoryItemAction.pasteWithoutFormatting.modifierFlags.description
   @State private var accessibilityTrusted = Accessibility.isTrusted
+  @State private var selectingImageEditor = false
 
   @State private var updater = SoftwareUpdater()
 
@@ -63,6 +65,55 @@ struct GeneralSettingsPane: View {
       ) {
         SingleKeyShortcutRecorder(for: .togglePreview)
           .help(Text("ShowPreviewTooltip", tableName: "GeneralSettings"))
+      }
+
+      Settings.Section(
+        bottomDivider: true,
+        label: { Text("ShelfPreviewImageEditor", tableName: "GeneralSettings") }
+      ) {
+        if let imageEditorURL {
+          HStack(spacing: 8) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: imageEditorURL.path))
+              .resizable()
+              .frame(width: 20, height: 20)
+            Text(NSWorkspace.shared.applicationName(url: imageEditorURL))
+              .lineLimit(1)
+          }
+        } else {
+          Text("ShelfPreviewImageEditorNotSet", tableName: "GeneralSettings")
+            .foregroundStyle(.secondary)
+        }
+
+        HStack(spacing: 10) {
+          Button {
+            selectingImageEditor = true
+          } label: {
+            Text("ShelfPreviewImageEditorChoose", tableName: "GeneralSettings")
+          }
+
+          if shelfPreviewImageEditorBundleID != nil {
+            Button {
+              shelfPreviewImageEditorBundleID = nil
+            } label: {
+              Text("ShelfPreviewImageEditorReset", tableName: "GeneralSettings")
+            }
+          }
+        }
+        .fileDialogDefaultDirectory(URL(string: "/Applications"))
+        .fileImporter(
+          isPresented: $selectingImageEditor,
+          allowedContentTypes: [.application]
+        ) { result in
+          switch result {
+          case .success(let appURL):
+            if let bundle = Bundle(url: appURL),
+               let bundleIdentifier = bundle.bundleIdentifier {
+              shelfPreviewImageEditorBundleID = bundleIdentifier
+            }
+          case .failure:
+            ()
+          }
+        }
       }
 
       Settings.Section(
@@ -159,6 +210,14 @@ struct GeneralSettingsPane: View {
 
   private func refreshAccessibility() {
     accessibilityTrusted = Accessibility.isTrusted
+  }
+
+  private var imageEditorURL: URL? {
+    guard let bundleID = shelfPreviewImageEditorBundleID else {
+      return nil
+    }
+
+    return NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
   }
 }
 

@@ -122,11 +122,6 @@ private struct ShelfContentView: View {
 
   var body: some View {
     VStack(spacing: 10) {
-      if appState.shelfPreview.isOpen {
-        ShelfPreviewPanelView()
-          .transition(.opacity.combined(with: .move(edge: .bottom)))
-      }
-
       ShelfTopStripView(
         searchQuery: $searchQuery,
         searchFocused: $searchFocused,
@@ -141,13 +136,13 @@ private struct ShelfContentView: View {
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 14)
-    .animation(.easeInOut(duration: 0.16), value: appState.shelfPreview.isOpen)
     .onAppear {
-      appState.shelfPreview.close()
+      appState.shelfPreview.closeAll()
       appState.history.selectTag(nil)
       searchFocused = false
       searchExpanded = false
       appState.navigator.highlightShelfFirst()
+      appState.shelfPreview.updateLeadSelection()
       appState.popup.needsResize = true
       DispatchQueue.main.async {
         if let window = NSApp.keyWindow {
@@ -174,12 +169,12 @@ private struct ShelfContentView: View {
         searchQuery = ""
         modifierFlags.flags = []
         appState.navigator.isKeyboardNavigating = true
-        appState.shelfPreview.close()
+        appState.shelfPreview.closeAll()
       }
       appState.popup.needsResize = true
     }
-    .onChange(of: appState.shelfPreview.isOpen) {
-      appState.popup.needsResize = true
+    .onChange(of: appState.navigator.leadSelection) {
+      appState.shelfPreview.updateLeadSelection()
     }
     .background {
       GeometryReader { geo in
@@ -897,6 +892,9 @@ private struct ShelfCardView: View {
       )
       .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
       .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+      .background {
+        ShelfCardFrameReporter(itemID: item.id)
+      }
     }
     .buttonStyle(.plain)
     .draggable(item.id.uuidString)
@@ -913,6 +911,65 @@ private struct ShelfCardView: View {
     }
     .onAppear {
       item.ensureThumbnailImage()
+    }
+    .onDisappear {
+      appState.shelfPreview.removeCardFrame(itemID: item.id)
+    }
+  }
+}
+
+private struct ShelfCardFrameReporter: NSViewRepresentable {
+  let itemID: UUID
+  @Environment(AppState.self) private var appState
+
+  func makeNSView(context: Context) -> ReporterView {
+    let view = ReporterView()
+    view.itemID = itemID
+    view.appState = appState
+    return view
+  }
+
+  func updateNSView(_ nsView: ReporterView, context: Context) {
+    nsView.itemID = itemID
+    nsView.appState = appState
+    nsView.reportFrame()
+  }
+
+  static func dismantleNSView(_ nsView: ReporterView, coordinator: ()) {
+    if let itemID = nsView.itemID {
+      AppState.shared.shelfPreview.removeCardFrame(itemID: itemID)
+    }
+  }
+
+  final class ReporterView: NSView {
+    weak var appState: AppState?
+    var itemID: UUID?
+
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      reportFrame()
+    }
+
+    override func viewDidMoveToSuperview() {
+      super.viewDidMoveToSuperview()
+      reportFrame()
+    }
+
+    override func layout() {
+      super.layout()
+      reportFrame()
+    }
+
+    func reportFrame() {
+      guard let appState,
+            let itemID,
+            let window else {
+        return
+      }
+
+      let frameInWindow = convert(bounds, to: nil)
+      let frameInScreen = window.convertToScreen(frameInWindow)
+      appState.shelfPreview.updateCardFrame(itemID: itemID, frame: frameInScreen)
     }
   }
 }
@@ -1044,28 +1101,287 @@ private struct ShelfWheelBridge: NSViewRepresentable {
   }
 }
 
-private struct ShelfPreviewPanelView: View {
+private struct ShelfPreviewPointerShape: Shape {
+  func path(in rect: CGRect) -> Path {
+    var path = Path()
+    path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+    path.addLine(to: CGPoint(x: rect.midX, y: rect.minY))
+    path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+    path.closeSubpath()
+    return path
+  }
+}
+
+struct ShelfPreviewPopupView: View {
   @Environment(AppState.self) private var appState
 
-  var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      ToolbarView()
+  private var item: HistoryItemDecorator? {
+    appState.navigator.leadHistoryItem
+  }
 
-      if let item = appState.navigator.leadHistoryItem {
-        PreviewItemView(item: item)
+  private func pluralized(_ count: Int, singular: String, plural: String) -> String {
+    if count == 1 {
+      return "\(count) \(singular)"
+    }
+    return "\(count) \(plural)"
+  }
+
+  private var textStats: (characters: Int, words: Int, lines: Int) {
+    let value = item?.item.previewableText ?? ""
+    let words = value
+      .components(separatedBy: .whitespacesAndNewlines)
+      .filter { !$0.isEmpty }
+      .count
+    let lines = max(1, value.components(separatedBy: .newlines).count)
+    return (characters: value.count, words: words, lines: lines)
+  }
+
+  private var footerText: String {
+    guard let item else {
+      return ""
+    }
+
+    if let image = item.item.image {
+      return "\(Int(image.size.width)) x \(Int(image.size.height))"
+    }
+
+    let stats = textStats
+    return [
+      pluralized(stats.characters, singular: "character", plural: "characters"),
+      pluralized(stats.words, singular: "word", plural: "words"),
+      pluralized(stats.lines, singular: "line", plural: "lines")
+    ].joined(separator: "  ·  ")
+  }
+
+  @ViewBuilder
+  private var previewContent: some View {
+    if let item {
+      if item.hasImage {
+        AsyncView<NSImage?, _, _> {
+          await item.asyncGetPreviewImage()
+        } content: { image in
+          Group {
+            if let image {
+              Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black.opacity(0.75))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else {
+              ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black.opacity(0.75))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+          }
+        } placeholder: {
+          ProgressView()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black.opacity(0.75))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
       } else {
-        Text("shelf_no_selection")
+        ScrollView {
+          Text(item.item.previewableText)
+            .font(.body)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+            .padding(14)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.82))
+        .foregroundStyle(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+      }
+    } else {
+      Text("shelf_no_selection")
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+  }
+
+  var body: some View {
+    VStack(spacing: 0) {
+      VStack(spacing: 0) {
+        HStack(spacing: 12) {
+          Button {
+            appState.shelfPreview.close()
+          } label: {
+            Image(systemName: "xmark.circle.fill")
+              .font(.title3)
+          }
+          .buttonStyle(.plain)
           .foregroundStyle(.secondary)
+          .accessibilityLabel("Close")
+          .accessibilityIdentifier("shelf-preview-close")
+
+          Text(LocalizedStringKey(item?.shelfTypeKey ?? "shelf_no_selection"))
+            .font(.headline)
+            .lineLimit(1)
+
+          Spacer(minLength: 0)
+
+          Button {
+            appState.shelfPreview.shareSelection()
+          } label: {
+            Image(systemName: "square.and.arrow.up")
+              .font(.title3)
+          }
+          .buttonStyle(.plain)
+          .disabled(!appState.shelfPreview.canShareSelection)
+          .accessibilityLabel("Share")
+          .accessibilityIdentifier("shelf-preview-share")
+
+          Button {
+            appState.shelfPreview.editSelection()
+          } label: {
+            Text("Edit")
+              .font(.headline)
+          }
+          .buttonStyle(.plain)
+          .disabled(!appState.shelfPreview.canEditSelection)
+          .accessibilityLabel("Edit")
+          .accessibilityIdentifier("shelf-preview-edit")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+
+        Divider()
+
+        previewContent
+          .padding(14)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+        Divider()
+
+        HStack {
+          Text(verbatim: footerText)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+          Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+      }
+      .background(.ultraThickMaterial)
+      .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+      .overlay {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+          .strokeBorder(.white.opacity(0.26), lineWidth: 1)
+      }
+
+      GeometryReader { geo in
+        let pointerOffset = max(16, min(appState.shelfPreview.pointerX - 14, geo.size.width - 44))
+
+        ShelfPreviewPointerShape()
+          .fill(.ultraThickMaterial)
+          .frame(width: 28, height: 12)
+          .offset(x: pointerOffset, y: -1)
+          .overlay {
+            ShelfPreviewPointerShape()
+              .stroke(.white.opacity(0.28), lineWidth: 1)
+              .frame(width: 28, height: 12)
+              .offset(x: pointerOffset, y: -1)
+          }
+      }
+      .frame(height: 11)
+    }
+    .padding(6)
+    .background(Color.clear)
+  }
+}
+
+struct ShelfTextEditorPopupView: View {
+  @Environment(AppState.self) private var appState
+  @FocusState private var editorFocused: Bool
+
+  private func pluralized(_ count: Int, singular: String, plural: String) -> String {
+    if count == 1 {
+      return "\(count) \(singular)"
+    }
+    return "\(count) \(plural)"
+  }
+
+  private var statsText: String {
+    let value = appState.shelfPreview.editingText
+    let words = value
+      .components(separatedBy: .whitespacesAndNewlines)
+      .filter { !$0.isEmpty }
+      .count
+    let lines = max(1, value.components(separatedBy: .newlines).count)
+    return [
+      pluralized(value.count, singular: "character", plural: "characters"),
+      pluralized(words, singular: "word", plural: "words"),
+      pluralized(lines, singular: "line", plural: "lines")
+    ].joined(separator: "  ·  ")
+  }
+
+  var body: some View {
+    VStack(spacing: 0) {
+      HStack {
+        Text("Edit Text")
+          .font(.headline)
+
+        Spacer(minLength: 0)
+
+        Button("Cancel") {
+          appState.shelfPreview.closeEditor()
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Cancel")
+        .accessibilityIdentifier("shelf-text-editor-cancel")
+
+        Button("Save") {
+          appState.shelfPreview.saveTextEditor()
+        }
+        .buttonStyle(.borderedProminent)
+        .keyboardShortcut(.defaultAction)
+        .accessibilityLabel("Save")
+        .accessibilityIdentifier("shelf-text-editor-save")
+      }
+      .padding(.horizontal, 14)
+      .padding(.vertical, 11)
+
+      Divider()
+
+      TextEditor(
+        text: Binding(
+          get: { appState.shelfPreview.editingText },
+          set: { appState.shelfPreview.updateEditingText($0) }
+        )
+      )
+      .font(.body)
+      .padding(10)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .focused($editorFocused)
+      .background(Color.black.opacity(0.83))
+      .foregroundStyle(.white)
+
+      Divider()
+
+      HStack {
+        Text(verbatim: statsText)
+          .font(.callout)
+          .foregroundStyle(.secondary)
+        Spacer(minLength: 0)
+      }
+      .padding(.horizontal, 14)
+      .padding(.vertical, 9)
+    }
+    .background(.ultraThickMaterial)
+    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .strokeBorder(.white.opacity(0.26), lineWidth: 1)
+    }
+    .padding(6)
+    .onAppear {
+      DispatchQueue.main.async {
+        editorFocused = true
       }
     }
-    .padding(14)
-    .frame(maxWidth: .infinity, minHeight: 220, maxHeight: 320, alignment: .topLeading)
-    .background(.ultraThinMaterial)
-    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-    .overlay(
-      RoundedRectangle(cornerRadius: 18, style: .continuous)
-        .strokeBorder(.white.opacity(0.22), lineWidth: 1)
-    )
   }
 }
 
