@@ -674,6 +674,8 @@ class ShelfPreview {
         self?.editingItemID = nil
       }
     )
+    panel.isMovable = true
+    panel.isMovableByWindowBackground = true
     panel.updateRootView(makeTextEditorView())
     panel.contentView?.setAccessibilityIdentifier("shelf-text-editor")
     textEditorPanel = panel

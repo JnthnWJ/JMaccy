@@ -1101,6 +1101,53 @@ private struct ShelfWheelBridge: NSViewRepresentable {
   }
 }
 
+private struct ShelfTextEditorAppearanceBridge: NSViewRepresentable {
+  func makeNSView(context: Context) -> NSView {
+    let view = NSView()
+    DispatchQueue.main.async {
+      configure(from: view)
+    }
+    return view
+  }
+
+  func updateNSView(_ nsView: NSView, context: Context) {
+    DispatchQueue.main.async {
+      configure(from: nsView)
+    }
+  }
+
+  private func configure(from view: NSView) {
+    guard let scrollView = findScrollView(from: view),
+          let textView = scrollView.documentView as? NSTextView else {
+      return
+    }
+
+    scrollView.borderType = .noBorder
+    scrollView.drawsBackground = false
+    scrollView.backgroundColor = .clear
+    scrollView.hasHorizontalScroller = false
+    scrollView.hasVerticalScroller = true
+    scrollView.autohidesScrollers = true
+    scrollView.scrollerStyle = .overlay
+
+    textView.drawsBackground = false
+    textView.backgroundColor = .clear
+    textView.textColor = .labelColor
+    textView.insertionPointColor = .labelColor
+  }
+
+  private func findScrollView(from view: NSView) -> NSScrollView? {
+    var current: NSView? = view
+    while let candidate = current {
+      if let scrollView = candidate.enclosingScrollView {
+        return scrollView
+      }
+      current = candidate.superview
+    }
+    return nil
+  }
+}
+
 private struct ShelfPreviewPointerShape: Shape {
   func path(in rect: CGRect) -> Path {
     let tip = CGPoint(x: rect.midX, y: rect.maxY)
@@ -1386,10 +1433,14 @@ struct ShelfTextEditorPopupView: View {
   }
 
   var body: some View {
+    let chromeColor = Color(nsColor: .windowBackgroundColor).opacity(0.94)
+    let editorBackground = Color(nsColor: .textBackgroundColor)
+
     VStack(spacing: 0) {
-      HStack {
+      HStack(spacing: 12) {
         Text("Edit Text")
           .font(.headline)
+          .foregroundStyle(.primary)
 
         Spacer(minLength: 0)
 
@@ -1410,21 +1461,29 @@ struct ShelfTextEditorPopupView: View {
       }
       .padding(.horizontal, 14)
       .padding(.vertical, 11)
+      .background(chromeColor)
 
       Divider()
 
-      TextEditor(
-        text: Binding(
-          get: { appState.shelfPreview.editingText },
-          set: { appState.shelfPreview.updateEditingText($0) }
+      ZStack {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+          .fill(editorBackground)
+
+        TextEditor(
+          text: Binding(
+            get: { appState.shelfPreview.editingText },
+            set: { appState.shelfPreview.updateEditingText($0) }
+          )
         )
-      )
-      .font(.body)
-      .padding(10)
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .focused($editorFocused)
-      .background(Color.black.opacity(0.83))
-      .foregroundStyle(.white)
+        .font(.body)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .focused($editorFocused)
+        .foregroundStyle(.primary)
+        .background(ShelfTextEditorAppearanceBridge())
+      }
+      .padding(12)
 
       Divider()
 
@@ -1436,12 +1495,13 @@ struct ShelfTextEditorPopupView: View {
       }
       .padding(.horizontal, 14)
       .padding(.vertical, 9)
+      .background(chromeColor)
     }
-    .background(.ultraThickMaterial)
+    .background(chromeColor)
     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     .overlay {
       RoundedRectangle(cornerRadius: 16, style: .continuous)
-        .strokeBorder(.white.opacity(0.26), lineWidth: 1)
+        .strokeBorder(.black.opacity(0.08), lineWidth: 0.5)
     }
     .padding(6)
     .onAppear {
