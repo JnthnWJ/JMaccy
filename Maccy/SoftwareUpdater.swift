@@ -4,21 +4,32 @@ import Sparkle
 class SoftwareUpdater {
   var automaticallyChecksForUpdates = false {
     didSet {
-      updater.automaticallyChecksForUpdates = automaticallyChecksForUpdates
+      updater?.automaticallyChecksForUpdates = automaticallyChecksForUpdates
     }
   }
 
-  private var updater: SPUUpdater
-  private var automaticallyChecksForUpdatesObservation: NSKeyValueObservation?
+  let isAvailable: Bool
 
-  private let updaterController = SPUStandardUpdaterController(
-    startingUpdater: true,
-    updaterDelegate: nil,
-    userDriverDelegate: nil
-  )
+  private var updater: SPUUpdater?
+  private var automaticallyChecksForUpdatesObservation: NSKeyValueObservation?
+  private var updaterController: SPUStandardUpdaterController?
 
   init() {
-    updater = updaterController.updater
+    guard Self.hasEdDSAPublicKey else {
+      isAvailable = false
+      return
+    }
+
+    isAvailable = true
+
+    updaterController = SPUStandardUpdaterController(
+      startingUpdater: true,
+      updaterDelegate: nil,
+      userDriverDelegate: nil
+    )
+
+    guard let updater = updaterController?.updater else { return }
+    self.updater = updater
     automaticallyChecksForUpdatesObservation = updater.observe(
       \.automaticallyChecksForUpdates,
       options: [.initial, .new, .old]
@@ -32,6 +43,14 @@ class SoftwareUpdater {
   }
 
   func checkForUpdates() {
-    updater.checkForUpdates()
+    updater?.checkForUpdates()
+  }
+
+  static var hasEdDSAPublicKey: Bool {
+    guard let value = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String else {
+      return false
+    }
+
+    return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 }

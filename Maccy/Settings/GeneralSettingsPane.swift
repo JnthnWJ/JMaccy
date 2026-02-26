@@ -28,13 +28,15 @@ struct GeneralSettingsPane: View {
         LaunchAtLogin.Toggle {
           Text("LaunchAtLogin", tableName: "GeneralSettings")
         }
-        Toggle(isOn: $updater.automaticallyChecksForUpdates) {
-          Text("CheckForUpdates", tableName: "GeneralSettings")
+        if updater.isAvailable {
+          Toggle(isOn: $updater.automaticallyChecksForUpdates) {
+            Text("CheckForUpdates", tableName: "GeneralSettings")
+          }
+          Button(
+            action: { updater.checkForUpdates() },
+            label: { Text("CheckNow", tableName: "GeneralSettings") }
+          )
         }
-        Button(
-          action: { updater.checkForUpdates() },
-          label: { Text("CheckNow", tableName: "GeneralSettings") }
-        )
       }
 
       Settings.Section(label: { Text("Open", tableName: "GeneralSettings") }) {

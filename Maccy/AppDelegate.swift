@@ -28,11 +28,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationWillFinishLaunching(_ notification: Notification) { // swiftlint:disable:this function_body_length
     #if DEBUG
     if CommandLine.arguments.contains("enable-testing") {
-      SPUUpdater(hostBundle: Bundle.main,
-                 applicationBundle: Bundle.main,
-                 userDriver: SPUStandardUserDriver(hostBundle: Bundle.main, delegate: nil),
-                 delegate: nil)
-      .automaticallyChecksForUpdates = false
+      if SoftwareUpdater.hasEdDSAPublicKey {
+        SPUUpdater(hostBundle: Bundle.main,
+                   applicationBundle: Bundle.main,
+                   userDriver: SPUStandardUserDriver(hostBundle: Bundle.main, delegate: nil),
+                   delegate: nil)
+        .automaticallyChecksForUpdates = false
+      }
     }
     #endif
 

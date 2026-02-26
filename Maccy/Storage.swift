@@ -181,13 +181,36 @@ final class CloudKitHistoryStoreImpl: CloudKitHistoryStore {
   }
 
   private func fetchRecords(type: String) async throws -> [CKRecord] {
+    let allRecords = try await fetchAllRecordsInZone()
+    return allRecords.filter { $0.recordType == type }
+  }
+
+  private func fetchAllRecordsInZone() async throws -> [CKRecord] {
     try await withCheckedThrowingContinuation { continuation in
       var records: [CKRecord] = []
-      let query = CKQuery(recordType: type, predicate: NSPredicate(value: true))
-      let op = CKQueryOperation(query: query)
-      op.zoneID = zoneID
-      op.recordFetchedBlock = { records.append($0) }
-      op.queryCompletionBlock = { _, error in
+      var zoneLevelError: Error?
+
+      let config = CKFetchRecordZoneChangesOperation.ZoneConfiguration()
+      config.previousServerChangeToken = nil
+
+      let op = CKFetchRecordZoneChangesOperation(
+        recordZoneIDs: [zoneID],
+        configurationsByRecordZoneID: [zoneID: config]
+      )
+      op.recordChangedBlock = { record in
+        records.append(record)
+      }
+      op.recordZoneFetchCompletionBlock = { _, _, _, _, error in
+        if zoneLevelError == nil, let error {
+          zoneLevelError = error
+        }
+      }
+      op.fetchRecordZoneChangesCompletionBlock = { error in
+        if let zoneLevelError {
+          continuation.resume(throwing: zoneLevelError)
+          return
+        }
+
         if let error {
           continuation.resume(throwing: error)
         } else {
@@ -360,7 +383,11 @@ class SyncEncryptionManager {
   }
 
   func enableEncryptionFromUI() {
-    guard !Defaults[.encryptionEnabled] else { return }
+    let isConfigured = Defaults[.encryptionSalt] != nil && Defaults[.encryptionVerifier] != nil
+    if Defaults[.encryptionEnabled] && isConfigured {
+      return
+    }
+
     guard let password = promptForNewPassword() else {
       Defaults[.encryptionEnabled] = false
       return
@@ -373,7 +400,8 @@ class SyncEncryptionManager {
   }
 
   func disableEncryptionAndWipeFromUI() {
-    guard Defaults[.encryptionEnabled] else { return }
+    let isConfigured = Defaults[.encryptionSalt] != nil || Defaults[.encryptionVerifier] != nil
+    guard Defaults[.encryptionEnabled] || isConfigured else { return }
 
     let alert = NSAlert()
     alert.alertStyle = .warning
@@ -549,11 +577,11 @@ class SyncEncryptionManager {
         try? await History.shared.load()
       }
     } catch {
-      Defaults[.cloudSyncStatus] = mapCloudError(error)
-      statusText = Defaults[.cloudSyncStatus].description
+      let syncStatus = mapCloudError(error)
+      Defaults[.cloudSyncStatus] = syncStatus
+      statusText = cloudErrorStatusText(syncStatus, error: error)
+      NSLog("[Maccy] Cloud sync failed (\(trigger)): \(describeCloudError(error))")
     }
-
-    _ = trigger
   }
 
   private func fetchRemoteSnapshot() async throws -> SyncSnapshot {
@@ -930,15 +958,61 @@ class SyncEncryptionManager {
       return .unavailable
     }
 
-    if let ck = error as? CKError {
+    if let ck = extractCloudError(error) {
       switch ck.code {
       case .notAuthenticated: return .authRequired
       case .quotaExceeded: return .quotaExceeded
-      case .networkFailure, .networkUnavailable: return .unavailable
+      case .networkFailure, .networkUnavailable, .serviceUnavailable, .requestRateLimited, .zoneBusy:
+        return .unavailable
       default: return .error
       }
     }
     return .error
+  }
+
+  private func cloudErrorStatusText(_ status: CloudSyncStatus, error: Error) -> String {
+    guard status == .error, let ckError = extractCloudError(error) else {
+      return status.description
+    }
+
+    switch ckError.code {
+    case .badContainer, .missingEntitlement, .permissionFailure:
+      return "iCloud setup issue (\(ckError.code)). Verify container and signing setup."
+    default:
+      return "\(status.description) (\(ckError.code))"
+    }
+  }
+
+  private func extractCloudError(_ error: Error) -> CKError? {
+    if let ckError = error as? CKError {
+      return ckError
+    }
+
+    let nsError = error as NSError
+    if let underlyingError = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
+      return extractCloudError(underlyingError)
+    }
+
+    if let partialErrors = nsError.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Any] {
+      for value in partialErrors.values {
+        if let nestedError = value as? Error,
+           let ckError = extractCloudError(nestedError) {
+          return ckError
+        }
+      }
+    }
+
+    return nil
+  }
+
+  private func describeCloudError(_ error: Error) -> String {
+    if let ckError = extractCloudError(error) {
+      let nsError = ckError as NSError
+      return "code=\(ckError.code) domain=\(nsError.domain) message=\(nsError.localizedDescription)"
+    }
+
+    let nsError = error as NSError
+    return "domain=\(nsError.domain) code=\(nsError.code) message=\(nsError.localizedDescription)"
   }
 
   private func encodeForCloud(_ data: Data) throws -> (Data, Bool) {
