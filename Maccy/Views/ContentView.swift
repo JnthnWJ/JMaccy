@@ -1142,6 +1142,15 @@ private struct ShelfPreviewPointerOutlineShape: Shape {
   }
 }
 
+private enum ShelfPreviewPointerMetrics {
+  static let width: CGFloat = 42
+  static let height: CGFloat = 16
+  static let inset: CGFloat = 10
+  static let yOffset: CGFloat = -0.5
+  static let borderGapInset: CGFloat = 4
+  static let borderGapHeight: CGFloat = 2
+}
+
 struct ShelfPreviewPopupView: View {
   @Environment(AppState.self) private var appState
 
@@ -1298,22 +1307,43 @@ struct ShelfPreviewPopupView: View {
       .background(.ultraThickMaterial)
       .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
       .overlay {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
-          .strokeBorder(.white.opacity(0.26), lineWidth: 1)
+        GeometryReader { geo in
+          let pointerOffset = max(
+            ShelfPreviewPointerMetrics.inset,
+            min(
+              appState.shelfPreview.pointerX - ShelfPreviewPointerMetrics.width / 2,
+              geo.size.width - ShelfPreviewPointerMetrics.width - ShelfPreviewPointerMetrics.inset
+            )
+          )
+          let borderGapWidth = ShelfPreviewPointerMetrics.width - (ShelfPreviewPointerMetrics.borderGapInset * 2)
+
+          RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .strokeBorder(.white.opacity(0.26), lineWidth: 1)
+            .overlay(alignment: .topLeading) {
+              Rectangle()
+                .frame(width: borderGapWidth, height: ShelfPreviewPointerMetrics.borderGapHeight)
+                .offset(
+                  x: pointerOffset + ShelfPreviewPointerMetrics.borderGapInset,
+                  y: geo.size.height - 1
+                )
+                .blendMode(.destinationOut)
+            }
+            .compositingGroup()
+        }
       }
 
       GeometryReader { geo in
-        let pointerWidth: CGFloat = 42
-        let pointerHeight: CGFloat = 16
-        let pointerInset: CGFloat = 10
         let pointerOffset = max(
-          pointerInset,
-          min(appState.shelfPreview.pointerX - pointerWidth / 2, geo.size.width - pointerWidth - pointerInset)
+          ShelfPreviewPointerMetrics.inset,
+          min(
+            appState.shelfPreview.pointerX - ShelfPreviewPointerMetrics.width / 2,
+            geo.size.width - ShelfPreviewPointerMetrics.width - ShelfPreviewPointerMetrics.inset
+          )
         )
 
         ShelfPreviewPointerShape()
           .fill(.ultraThickMaterial)
-          .frame(width: pointerWidth, height: pointerHeight)
+          .frame(width: ShelfPreviewPointerMetrics.width, height: ShelfPreviewPointerMetrics.height)
           .overlay {
             ShelfPreviewPointerOutlineShape()
               .stroke(
@@ -1321,7 +1351,7 @@ struct ShelfPreviewPopupView: View {
                 style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round)
               )
           }
-          .offset(x: pointerOffset, y: -0.5)
+          .offset(x: pointerOffset, y: ShelfPreviewPointerMetrics.yOffset)
       }
       .frame(height: 15)
     }
