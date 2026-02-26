@@ -7,7 +7,9 @@ class PasteStack: Identifiable, Hashable {
 
   static func initializeIfNeeded() {
     guard listener == nil else { return }
-    Accessibility.check()
+    guard Accessibility.check(prompt: true) else {
+      return
+    }
 
     var pasteDown: Bool = false
     listener = NSEvent.addGlobalMonitorForEvents(matching: [.keyUp, .keyDown]) { event in

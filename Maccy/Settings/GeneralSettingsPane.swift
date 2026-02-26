@@ -16,6 +16,7 @@ struct GeneralSettingsPane: View {
   @State private var copyModifier = HistoryItemAction.copy.modifierFlags.description
   @State private var pasteModifier = HistoryItemAction.paste.modifierFlags.description
   @State private var pasteWithoutFormatting = HistoryItemAction.pasteWithoutFormatting.modifierFlags.description
+  @State private var accessibilityTrusted = Accessibility.isTrusted
 
   @State private var updater = SoftwareUpdater()
 
@@ -100,6 +101,8 @@ struct GeneralSettingsPane: View {
         .fixedSize(horizontal: false, vertical: true)
         .foregroundStyle(.gray)
         .controlSize(.small)
+
+        accessibilityPermissionView
       }
 
       Settings.Section(title: "") {
@@ -110,12 +113,52 @@ struct GeneralSettingsPane: View {
         }
       }
     }
+    .onAppear {
+      refreshAccessibility()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+      refreshAccessibility()
+    }
   }
 
   private func refreshModifiers(_ sender: Sendable) {
     copyModifier = HistoryItemAction.copy.modifierFlags.description
     pasteModifier = HistoryItemAction.paste.modifierFlags.description
     pasteWithoutFormatting = HistoryItemAction.pasteWithoutFormatting.modifierFlags.description
+  }
+
+  @ViewBuilder
+  private var accessibilityPermissionView: some View {
+    Label(
+      accessibilityTrusted ? "Accessibility permission: Granted" : "Accessibility permission: Not granted",
+      systemImage: accessibilityTrusted ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+    )
+    .foregroundStyle(accessibilityTrusted ? .green : .orange)
+    .fixedSize(horizontal: false, vertical: true)
+
+    if !accessibilityTrusted {
+      Text(accessibilityComment)
+        .fixedSize(horizontal: false, vertical: true)
+        .foregroundStyle(.gray)
+        .controlSize(.small)
+
+      Button("Open Accessibility Settings") {
+        Accessibility.openSettings()
+      }
+    }
+  }
+
+  private var accessibilityComment: String {
+    let message = NSLocalizedString("accessibility_alert_comment", comment: "")
+    let pane = NSLocalizedString("system_settings_pane", comment: "")
+    let settings = NSLocalizedString("system_settings_name", comment: "")
+    return message
+      .replacingOccurrences(of: "{pane}", with: pane)
+      .replacingOccurrences(of: "{settings}", with: settings)
+  }
+
+  private func refreshAccessibility() {
+    accessibilityTrusted = Accessibility.isTrusted
   }
 }
 
