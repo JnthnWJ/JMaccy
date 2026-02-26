@@ -1103,11 +1103,41 @@ private struct ShelfWheelBridge: NSViewRepresentable {
 
 private struct ShelfPreviewPointerShape: Shape {
   func path(in rect: CGRect) -> Path {
+    let tip = CGPoint(x: rect.midX, y: rect.maxY)
+    let leftControl1 = CGPoint(x: rect.minX + rect.width * 0.20, y: rect.minY)
+    let leftControl2 = CGPoint(x: rect.midX - rect.width * 0.24, y: rect.maxY * 0.9)
+    let rightControl1 = CGPoint(x: rect.midX + rect.width * 0.24, y: rect.maxY * 0.9)
+    let rightControl2 = CGPoint(x: rect.maxX - rect.width * 0.20, y: rect.minY)
+
     var path = Path()
-    path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-    path.addLine(to: CGPoint(x: rect.midX, y: rect.minY))
-    path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+    path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+    path.addCurve(to: tip, control1: leftControl1, control2: leftControl2)
+    path.addCurve(
+      to: CGPoint(x: rect.maxX, y: rect.minY),
+      control1: rightControl1,
+      control2: rightControl2
+    )
     path.closeSubpath()
+    return path
+  }
+}
+
+private struct ShelfPreviewPointerOutlineShape: Shape {
+  func path(in rect: CGRect) -> Path {
+    let tip = CGPoint(x: rect.midX, y: rect.maxY)
+    let leftControl1 = CGPoint(x: rect.minX + rect.width * 0.20, y: rect.minY)
+    let leftControl2 = CGPoint(x: rect.midX - rect.width * 0.24, y: rect.maxY * 0.9)
+    let rightControl1 = CGPoint(x: rect.midX + rect.width * 0.24, y: rect.maxY * 0.9)
+    let rightControl2 = CGPoint(x: rect.maxX - rect.width * 0.20, y: rect.minY)
+
+    var path = Path()
+    path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+    path.addCurve(to: tip, control1: leftControl1, control2: leftControl2)
+    path.addCurve(
+      to: CGPoint(x: rect.maxX, y: rect.minY),
+      control1: rightControl1,
+      control2: rightControl2
+    )
     return path
   }
 }
@@ -1273,20 +1303,27 @@ struct ShelfPreviewPopupView: View {
       }
 
       GeometryReader { geo in
-        let pointerOffset = max(16, min(appState.shelfPreview.pointerX - 14, geo.size.width - 44))
+        let pointerWidth: CGFloat = 42
+        let pointerHeight: CGFloat = 16
+        let pointerInset: CGFloat = 10
+        let pointerOffset = max(
+          pointerInset,
+          min(appState.shelfPreview.pointerX - pointerWidth / 2, geo.size.width - pointerWidth - pointerInset)
+        )
 
         ShelfPreviewPointerShape()
           .fill(.ultraThickMaterial)
-          .frame(width: 28, height: 12)
-          .offset(x: pointerOffset, y: -1)
+          .frame(width: pointerWidth, height: pointerHeight)
           .overlay {
-            ShelfPreviewPointerShape()
-              .stroke(.white.opacity(0.28), lineWidth: 1)
-              .frame(width: 28, height: 12)
-              .offset(x: pointerOffset, y: -1)
+            ShelfPreviewPointerOutlineShape()
+              .stroke(
+                .white.opacity(0.26),
+                style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round)
+              )
           }
+          .offset(x: pointerOffset, y: -0.5)
       }
-      .frame(height: 11)
+      .frame(height: 15)
     }
     .padding(6)
     .background(Color.clear)
