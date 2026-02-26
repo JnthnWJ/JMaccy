@@ -108,6 +108,7 @@ struct EncryptedHistoryRepository: HistoryRepository {
 protocol CloudKitHistoryStore {
   func fetchItemRecords() async throws -> [CKRecord]
   func fetchTagRecords() async throws -> [CKRecord]
+  func fetchVaultMetadataRecord() async throws -> CKRecord?
   func save(records: [CKRecord]) async throws
 }
 
@@ -122,6 +123,10 @@ final class UnavailableCloudKitHistoryStore: CloudKitHistoryStore {
     throw CloudStoreUnavailableError()
   }
 
+  func fetchVaultMetadataRecord() async throws -> CKRecord? {
+    throw CloudStoreUnavailableError()
+  }
+
   func save(records: [CKRecord]) async throws {
     throw CloudStoreUnavailableError()
   }
@@ -130,6 +135,8 @@ final class UnavailableCloudKitHistoryStore: CloudKitHistoryStore {
 final class CloudKitHistoryStoreImpl: CloudKitHistoryStore {
   private let itemType = "MaccyEncryptedItem"
   private let tagType = "MaccyEncryptedTag"
+  private let vaultMetadataType = "MaccyVaultMetadata"
+  private let vaultMetadataRecordName = "vault-metadata"
   private let zoneID = CKRecordZone.ID(zoneName: "MaccyHistoryZone", ownerName: CKCurrentUserDefaultName)
   private let database = CKContainer.default().privateCloudDatabase
 
@@ -141,6 +148,12 @@ final class CloudKitHistoryStoreImpl: CloudKitHistoryStore {
   func fetchTagRecords() async throws -> [CKRecord] {
     try await ensureZone()
     return try await fetchRecords(type: tagType)
+  }
+
+  func fetchVaultMetadataRecord() async throws -> CKRecord? {
+    try await ensureZone()
+    let records = try await fetchRecords(type: vaultMetadataType)
+    return records.first(where: { $0.recordID.recordName == vaultMetadataRecordName }) ?? records.first
   }
 
   func save(records: [CKRecord]) async throws {
@@ -275,6 +288,8 @@ class SyncEncryptionManager {
 
   private let cloudStore: CloudKitHistoryStore
   private let zoneID = CKRecordZone.ID(zoneName: "MaccyHistoryZone", ownerName: CKCurrentUserDefaultName)
+  private let vaultMetadataType = "MaccyVaultMetadata"
+  private let vaultMetadataRecordName = "vault-metadata"
   private var runtimeKey: SymmetricKey?
   private var lockTimerTask: Task<Void, Never>?
   private var notifiedCapturePause = false
@@ -315,9 +330,8 @@ class SyncEncryptionManager {
       isLocked = true
 
       if Defaults[.encryptionSalt] == nil || Defaults[.encryptionVerifier] == nil {
-        if let password = promptForNewPassword() {
-          setPassword(password)
-          _ = unlock(password: password)
+        Task { [weak self] in
+          await self?.resolveBootstrapCredentials()
         }
       } else {
         unlockWithPrompt()
@@ -383,20 +397,9 @@ class SyncEncryptionManager {
   }
 
   func enableEncryptionFromUI() {
-    let isConfigured = Defaults[.encryptionSalt] != nil && Defaults[.encryptionVerifier] != nil
-    if Defaults[.encryptionEnabled] && isConfigured {
-      return
+    Task { [weak self] in
+      await self?.enableEncryptionFlowFromUI()
     }
-
-    guard let password = promptForNewPassword() else {
-      Defaults[.encryptionEnabled] = false
-      return
-    }
-
-    setPassword(password)
-    migratePlainToEncryptedRuntime(password: password)
-    Defaults[.encryptionEnabled] = true
-    _ = unlock(password: password)
   }
 
   func disableEncryptionAndWipeFromUI() {
@@ -559,6 +562,7 @@ class SyncEncryptionManager {
     defer { isSyncInProgress = false }
 
     do {
+      try await hydrateLocalVaultCredentialsFromCloudIfNeeded()
       let local = buildLocalSnapshot()
       let remote = try await fetchRemoteSnapshot()
       var merged = merge(local: local, remote: remote)
@@ -650,6 +654,10 @@ class SyncEncryptionManager {
       record["blob"] = blob as CKRecordValue
       record["encrypted"] = NSNumber(booleanLiteral: encrypted)
       records.append(record)
+    }
+
+    if let vaultRecord = buildVaultMetadataRecord() {
+      records.append(vaultRecord)
     }
 
     return records
@@ -1015,6 +1023,80 @@ class SyncEncryptionManager {
     return "domain=\(nsError.domain) code=\(nsError.code) message=\(nsError.localizedDescription)"
   }
 
+  private func buildVaultMetadataRecord() -> CKRecord? {
+    guard Defaults[.encryptionEnabled],
+          let salt = Defaults[.encryptionSalt],
+          let verifier = Defaults[.encryptionVerifier] else {
+      return nil
+    }
+
+    let recordID = CKRecord.ID(recordName: vaultMetadataRecordName, zoneID: zoneID)
+    let record = CKRecord(recordType: vaultMetadataType, recordID: recordID)
+    record["salt"] = salt as CKRecordValue
+    record["verifier"] = verifier as CKRecordValue
+    record["vaultVersion"] = NSNumber(value: Defaults[.encryptedVaultVersion])
+    return record
+  }
+
+  private func hydrateLocalVaultCredentialsFromCloudIfNeeded() async throws {
+    let isConfigured = Defaults[.encryptionSalt] != nil && Defaults[.encryptionVerifier] != nil
+    guard !isConfigured else { return }
+
+    guard let record = try await cloudStore.fetchVaultMetadataRecord(),
+          let salt = record["salt"] as? Data,
+          let verifier = record["verifier"] as? Data else {
+      return
+    }
+
+    Defaults[.encryptionSalt] = salt
+    Defaults[.encryptionVerifier] = verifier
+  }
+
+  private func resolveBootstrapCredentials() async {
+    if Defaults[.syncEnabled] {
+      try? await hydrateLocalVaultCredentialsFromCloudIfNeeded()
+    }
+
+    if Defaults[.encryptionSalt] == nil || Defaults[.encryptionVerifier] == nil {
+      guard let password = promptForNewPassword() else {
+        Defaults[.encryptionEnabled] = false
+        isLocked = false
+        Storage.shared.activatePlainRuntime()
+        return
+      }
+      setPassword(password)
+      _ = unlock(password: password)
+      return
+    }
+
+    unlockWithPrompt()
+  }
+
+  private func enableEncryptionFlowFromUI() async {
+    if Defaults[.syncEnabled] {
+      try? await hydrateLocalVaultCredentialsFromCloudIfNeeded()
+    }
+
+    let isConfigured = Defaults[.encryptionSalt] != nil && Defaults[.encryptionVerifier] != nil
+    if isConfigured {
+      Defaults[.encryptionEnabled] = true
+      Storage.shared.activateEncryptedRuntime()
+      isLocked = true
+      unlockWithPrompt()
+      return
+    }
+
+    guard let password = promptForNewPassword() else {
+      Defaults[.encryptionEnabled] = false
+      return
+    }
+
+    setPassword(password)
+    migratePlainToEncryptedRuntime(password: password)
+    Defaults[.encryptionEnabled] = true
+    _ = unlock(password: password)
+  }
+
   private func encodeForCloud(_ data: Data) throws -> (Data, Bool) {
     if Defaults[.encryptionEnabled], let key = runtimeKey {
       return (try encrypt(data, with: key), true)
@@ -1144,18 +1226,29 @@ class SyncEncryptionManager {
     alert.informativeText = NSLocalizedString("VaultCreateBody", tableName: "StorageSettings", comment: "")
 
     let password = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+    password.placeholderString = NSLocalizedString("VaultPasswordLabel", tableName: "StorageSettings", comment: "")
     let confirm = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+    confirm.placeholderString = NSLocalizedString("VaultPasswordConfirmLabel", tableName: "StorageSettings", comment: "")
 
-    let stack = NSStackView(views: [
-      NSTextField(labelWithString: NSLocalizedString("VaultPasswordLabel", tableName: "StorageSettings", comment: "")),
-      password,
-      NSTextField(labelWithString: NSLocalizedString("VaultPasswordConfirmLabel", tableName: "StorageSettings", comment: "")),
-      confirm
-    ])
+    let stack = NSStackView()
     stack.orientation = .vertical
-    stack.spacing = 6
+    stack.alignment = .leading
+    stack.distribution = .fill
+    stack.spacing = 8
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    stack.addArrangedSubview(password)
+    stack.addArrangedSubview(confirm)
 
-    alert.accessoryView = stack
+    let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 56))
+    accessory.addSubview(stack)
+    NSLayoutConstraint.activate([
+      stack.leadingAnchor.constraint(equalTo: accessory.leadingAnchor),
+      stack.trailingAnchor.constraint(equalTo: accessory.trailingAnchor),
+      stack.topAnchor.constraint(equalTo: accessory.topAnchor),
+      stack.bottomAnchor.constraint(equalTo: accessory.bottomAnchor)
+    ])
+
+    alert.accessoryView = accessory
     alert.addButton(withTitle: NSLocalizedString("SetPassword", tableName: "StorageSettings", comment: ""))
     alert.addButton(withTitle: NSLocalizedString("Cancel", comment: ""))
 
