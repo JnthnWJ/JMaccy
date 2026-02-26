@@ -388,6 +388,8 @@ private struct ShelfTopStripView: View {
     .onChange(of: searchFocused) {
       if searchFocused {
         searchExpanded = true
+      } else if searchQuery.isEmpty {
+        searchExpanded = false
       }
     }
   }

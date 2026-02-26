@@ -192,10 +192,31 @@ class MaccyUITests: XCTestCase {
     secondCard.click()
 
     assertExists(app.descendants(matching: .any)["shelf-top-strip"])
+    assertExists(app.descendants(matching: .any)["shelf-search-field"])
 
     app.typeKey("z", modifierFlags: [])
     waitForSearch()
     XCTAssertEqual(searchInput.value as? String, copy2)
+  }
+
+  func testShelfDefocusCollapsesEmptySearch() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    popUpWithMouse()
+
+    app.descendants(matching: .any)["shelf-search-toggle"].click()
+
+    let searchField = app.descendants(matching: .any)["shelf-search-field"]
+    let dotTag = app.descendants(matching: .any)["shelf-tag-dot-shelf_chip_clipboard"]
+    assertExists(searchField)
+    assertExists(dotTag)
+
+    dotTag.click()
+
+    assertExists(app.descendants(matching: .any)["shelf-top-strip"])
+    assertNotExists(searchField)
+    assertExists(app.descendants(matching: .any)["shelf-search-toggle"])
+    assertExists(app.descendants(matching: .any)["shelf-tag-full-shelf_chip_clipboard"])
   }
 
   func testShelfCardClickSelectsExactCardAcrossDirections() throws {

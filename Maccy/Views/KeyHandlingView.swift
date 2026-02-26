@@ -232,7 +232,7 @@ struct KeyHandlingView<Content: View>: View {
     case .close:
       if shelfMode, searchFocused {
         searchFocused = false
-        shelfSearchExpanded = true
+        shelfSearchExpanded = !searchQuery.isEmpty
         DispatchQueue.main.async {
           if let window = NSApp.keyWindow {
             window.makeFirstResponder(window.contentView)
