@@ -171,7 +171,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private func disableUnusedGlobalHotkeys() {
-    let names: [KeyboardShortcuts.Name] = [.delete, .pin]
+    // These shortcuts are handled only while the popup is visible.
+    let names: [KeyboardShortcuts.Name] = [.delete, .pin, .togglePreview]
     KeyboardShortcuts.disable(names)
 
     NotificationCenter.default.addObserver(
