@@ -768,6 +768,26 @@ final class SyncReliabilityTests: XCTestCase {
     XCTAssertTrue(ids.allSatisfy { store.itemSnapshot(id: $0)?.isDeleted == true })
   }
 
+  func testOversizedItemFallsBackToCloudTombstone() async {
+    let id = UUID()
+    let item = insertItem(id: id, text: "oversized")
+    item.contents.first?.value = Data(repeating: 0x41, count: 1_200_000)
+    item.updatedAt = Date.now.addingTimeInterval(5)
+    item.tagAssignmentUpdatedAt = item.updatedAt
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+
+    let store = MockCloudKitHistoryStore()
+    let manager = SyncEncryptionManager(cloudStore: store, configureSyncObservers: false)
+    await manager.requestSync(trigger: "manual", coalesceMutationBurst: false)
+
+    let isIdle = await manager.waitForSyncIdle(maxWait: 5.0)
+    XCTAssertTrue(isIdle)
+    XCTAssertEqual(store.saveCount, 1)
+    XCTAssertEqual(store.itemSnapshot(id: id)?.isDeleted, true)
+    XCTAssertEqual(store.itemSnapshot(id: id)?.contents.count, 0)
+  }
+
   private func wipeRuntimeStorage() {
     try? Storage.shared.context.delete(model: HistoryItem.self)
     try? Storage.shared.context.delete(model: HistoryTag.self)

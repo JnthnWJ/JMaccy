@@ -138,6 +138,7 @@ final class CloudKitHistoryStoreImpl: CloudKitHistoryStore {
   private let tagType = "MaccyEncryptedTag"
   private let vaultMetadataType = "MaccyVaultMetadata"
   private let vaultMetadataRecordName = "vault-metadata"
+  private let maxRecordsPerSaveBatch = 200
   private let zoneID = CKRecordZone.ID(zoneName: "MaccyHistoryZone", ownerName: CKCurrentUserDefaultName)
   private let database = CKContainer.default().privateCloudDatabase
 
@@ -161,6 +162,16 @@ final class CloudKitHistoryStoreImpl: CloudKitHistoryStore {
     guard !records.isEmpty else { return }
     try await ensureZone()
 
+    var start = 0
+    while start < records.count {
+      let end = min(start + maxRecordsPerSaveBatch, records.count)
+      let batch = Array(records[start..<end])
+      try await saveBatch(records: batch)
+      start = end
+    }
+  }
+
+  private func saveBatch(records: [CKRecord]) async throws {
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
       let op = CKModifyRecordsOperation(recordsToSave: records, recordIDsToDelete: nil)
       op.savePolicy = .changedKeys
@@ -295,6 +306,7 @@ class SyncEncryptionManager {
 
   private let logger = Logger(label: "org.p0deje.Maccy.sync")
   private let cloudStore: CloudKitHistoryStore
+  private let maxCloudBlobBytes = 900_000
   private let zoneID = CKRecordZone.ID(zoneName: "MaccyHistoryZone", ownerName: CKCurrentUserDefaultName)
   private let vaultMetadataType = "MaccyVaultMetadata"
   private let vaultMetadataRecordName = "vault-metadata"
@@ -774,31 +786,10 @@ class SyncEncryptionManager {
     var records: [CKRecord] = []
 
     for item in snapshot.items.values {
-      let cloudValue: HistoryItemSnapshot
-      if item.shared && !item.isDeleted {
-        cloudValue = item
-      } else {
-        cloudValue = HistoryItemSnapshot(
-          id: item.id,
-          application: nil,
-          firstCopiedAt: item.firstCopiedAt,
-          lastCopiedAt: item.lastCopiedAt,
-          updatedAt: item.updatedAt,
-          tagAssignmentUpdatedAt: item.tagAssignmentUpdatedAt,
-          numberOfCopies: 0,
-          pin: nil,
-          tagID: nil,
-          title: "",
-          contents: [],
-          isDeleted: true,
-          shared: false
-        )
-      }
+      let (cloudValue, blob, encrypted) = try cloudRecordPayload(for: item)
 
       let recordID = CKRecord.ID(recordName: "item-\(cloudValue.id)", zoneID: zoneID)
       let record = CKRecord(recordType: "MaccyEncryptedItem", recordID: recordID)
-      let payload = try JSONEncoder().encode(cloudValue)
-      let (blob, encrypted) = try encodeForCloud(payload)
       record["blob"] = blob as CKRecordValue
       record["encrypted"] = NSNumber(booleanLiteral: encrypted)
       records.append(record)
@@ -819,6 +810,41 @@ class SyncEncryptionManager {
     }
 
     return records
+  }
+
+  private func cloudRecordPayload(for item: HistoryItemSnapshot) throws -> (HistoryItemSnapshot, Data, Bool) {
+    if item.shared && !item.isDeleted {
+      let payload = try JSONEncoder().encode(item)
+      let (blob, encrypted) = try encodeForCloud(payload)
+      if blob.count <= maxCloudBlobBytes {
+        return (item, blob, encrypted)
+      }
+
+      logger.warning("Skipping oversized cloud item id='\(item.id.uuidString)' bytes=\(blob.count)")
+    }
+
+    let tombstone = cloudTombstone(for: item)
+    let payload = try JSONEncoder().encode(tombstone)
+    let (blob, encrypted) = try encodeForCloud(payload)
+    return (tombstone, blob, encrypted)
+  }
+
+  private func cloudTombstone(for item: HistoryItemSnapshot) -> HistoryItemSnapshot {
+    HistoryItemSnapshot(
+      id: item.id,
+      application: nil,
+      firstCopiedAt: item.firstCopiedAt,
+      lastCopiedAt: item.lastCopiedAt,
+      updatedAt: item.updatedAt,
+      tagAssignmentUpdatedAt: item.tagAssignmentUpdatedAt,
+      numberOfCopies: 0,
+      pin: nil,
+      tagID: nil,
+      title: "",
+      contents: [],
+      isDeleted: true,
+      shared: false
+    )
   }
 
   private func buildLocalSnapshot() -> SyncSnapshot {
