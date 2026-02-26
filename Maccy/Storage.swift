@@ -3,6 +3,7 @@ import CloudKit
 import CryptoKit
 import Defaults
 import Foundation
+import Logging
 import Observation
 import Security
 import SwiftData
@@ -240,10 +241,10 @@ final class CloudKitHistoryStoreImpl: CloudKitHistoryStore {
 class HistorySyncEngine {
   static let shared = HistorySyncEngine()
 
-  private var handler: (() async -> Void)?
+  private var handler: ((String) async -> Void)?
   private var loopTask: Task<Void, Never>?
 
-  func configure(handler: @escaping () async -> Void) {
+  func configure(handler: @escaping (String) async -> Void) {
     self.handler = handler
   }
 
@@ -251,7 +252,7 @@ class HistorySyncEngine {
     guard loopTask == nil else { return }
     loopTask = Task { [weak self] in
       while !Task.isCancelled {
-        await self?.handler?()
+        await self?.handler?("periodic")
         try? await Task.sleep(for: .seconds(45))
       }
     }
@@ -262,9 +263,9 @@ class HistorySyncEngine {
     loopTask = nil
   }
 
-  func requestSync() {
+  func requestSync(trigger: String) {
     Task { [weak self] in
-      await self?.handler?()
+      await self?.handler?(trigger)
     }
   }
 }
@@ -272,6 +273,12 @@ class HistorySyncEngine {
 @MainActor
 @Observable
 class SyncEncryptionManager {
+  private enum SyncPassResult {
+    case success
+    case staleMutationDetected
+    case skipped
+  }
+
   enum LockReason {
     case startup
     case sleep
@@ -286,6 +293,7 @@ class SyncEncryptionManager {
   var isSyncInProgress = false
   var statusText = ""
 
+  private let logger = Logger(label: "org.p0deje.Maccy.sync")
   private let cloudStore: CloudKitHistoryStore
   private let zoneID = CKRecordZone.ID(zoneName: "MaccyHistoryZone", ownerName: CKCurrentUserDefaultName)
   private let vaultMetadataType = "MaccyVaultMetadata"
@@ -295,8 +303,15 @@ class SyncEncryptionManager {
   private var notifiedCapturePause = false
   private var itemTombstones: [UUID: Date] = [:]
   private var tagTombstones: [UUID: Date] = [:]
+  private var localMutationRevision: UInt64 = 0
+  private var needsAnotherPass = false
+  private var syncTask: Task<Void, Never>?
+  private var pendingTriggers: Set<String> = []
+  private var coalescedTriggerCount = 0
+  private(set) var diagnosticsPassCount = 0
+  private(set) var diagnosticsStalePassCount = 0
 
-  init(cloudStore: CloudKitHistoryStore? = nil) {
+  init(cloudStore: CloudKitHistoryStore? = nil, configureSyncObservers: Bool = true) {
     if let cloudStore {
       self.cloudStore = cloudStore
     } else if Self.canInitializeCloudKitStore() {
@@ -308,17 +323,23 @@ class SyncEncryptionManager {
     }
     loadTombstones()
 
-    HistorySyncEngine.shared.configure { [weak self] in
-      await self?.reconcileAndSync(trigger: "periodic")
-    }
+    if configureSyncObservers {
+      HistorySyncEngine.shared.configure { [weak self] trigger in
+        let shouldCoalesce = trigger == "mutation"
+        await self?.requestSync(trigger: trigger, coalesceMutationBurst: shouldCoalesce)
+      }
 
-    Task {
-      for await _ in Defaults.updates(.syncEnabled, initial: false) {
-        if Defaults[.syncEnabled] {
-          HistorySyncEngine.shared.start()
-          HistorySyncEngine.shared.requestSync()
-        } else {
-          HistorySyncEngine.shared.stop()
+      Task {
+        for await _ in Defaults.updates(.syncEnabled, initial: false) {
+          if Defaults[.syncEnabled] {
+            HistorySyncEngine.shared.start()
+            HistorySyncEngine.shared.requestSync(trigger: "sync-enabled")
+          } else {
+            HistorySyncEngine.shared.stop()
+            syncTask?.cancel()
+            pendingTriggers.removeAll()
+            needsAnotherPass = false
+          }
         }
       }
     }
@@ -343,7 +364,7 @@ class SyncEncryptionManager {
 
     if Defaults[.syncEnabled] {
       HistorySyncEngine.shared.start()
-      HistorySyncEngine.shared.requestSync()
+      HistorySyncEngine.shared.requestSync(trigger: "bootstrap")
     }
   }
 
@@ -362,6 +383,11 @@ class SyncEncryptionManager {
     resetTimerLockIfNeeded()
   }
 
+  private func markLocalMutation(reason: String) {
+    localMutationRevision &+= 1
+    logger.debug("Mutation revision=\(localMutationRevision) reason='\(reason)'")
+  }
+
   func recordProtectedActionCompleted() {
     recordActivity()
     if Defaults[.unlockPolicy] == .strictPerAction {
@@ -376,11 +402,14 @@ class SyncEncryptionManager {
 
   func handleHistoryMutation() {
     recordActivity()
+    markLocalMutation(reason: "history-mutation")
     if Defaults[.encryptionEnabled] {
       persistEncryptedVaultFromRuntime()
     }
     if Defaults[.syncEnabled] {
-      HistorySyncEngine.shared.requestSync()
+      Task { [weak self] in
+        await self?.requestSync(trigger: "mutation", coalesceMutationBurst: true)
+      }
     }
   }
 
@@ -398,7 +427,7 @@ class SyncEncryptionManager {
 
   func manualSyncFromUI() {
     Task { [weak self] in
-      await self?.reconcileAndSync(trigger: "manual")
+      await self?.requestSync(trigger: "manual", coalesceMutationBurst: false)
     }
   }
 
@@ -507,13 +536,29 @@ class SyncEncryptionManager {
   }
 
   func recordDeletedItem(id: UUID, updatedAt: Date = .now) {
-    itemTombstones[id] = updatedAt
-    persistTombstones()
+    recordDeletedItems(ids: [id], updatedAt: updatedAt)
   }
 
   func recordDeletedTag(id: UUID, updatedAt: Date = .now) {
-    tagTombstones[id] = updatedAt
+    recordDeletedTags(ids: [id], updatedAt: updatedAt)
+  }
+
+  func recordDeletedItems(ids: [UUID], updatedAt: Date = .now) {
+    guard !ids.isEmpty else { return }
+    for id in ids {
+      itemTombstones[id] = updatedAt
+    }
     persistTombstones()
+    markLocalMutation(reason: "item-tombstones")
+  }
+
+  func recordDeletedTags(ids: [UUID], updatedAt: Date = .now) {
+    guard !ids.isEmpty else { return }
+    for id in ids {
+      tagTombstones[id] = updatedAt
+    }
+    persistTombstones()
+    markLocalMutation(reason: "tag-tombstones")
   }
 
   func persistEncryptedVaultFromRuntime() {
@@ -560,12 +605,108 @@ class SyncEncryptionManager {
   }
 
   func reconcileAndSync(trigger: String) async {
+    await requestSync(trigger: trigger, coalesceMutationBurst: false)
+  }
+
+  func requestSync(trigger: String, coalesceMutationBurst: Bool = false) async {
     guard Defaults[.syncEnabled] else { return }
-    guard !isSyncInProgress else { return }
+
+    pendingTriggers.insert(trigger)
+    needsAnotherPass = true
+
+    if coalesceMutationBurst {
+      coalescedTriggerCount += 1
+      logger.debug("Queued coalesced sync trigger='\(trigger)' count=\(coalescedTriggerCount)")
+    }
+
+    guard syncTask == nil else { return }
+
+    syncTask = Task { [weak self] in
+      await self?.drainSyncPasses(initialCoalesce: coalesceMutationBurst)
+    }
+  }
+
+  private func drainSyncPasses(initialCoalesce: Bool) async {
+    isSyncInProgress = true
+    defer {
+      isSyncInProgress = false
+      syncTask = nil
+      if !Task.isCancelled, needsAnotherPass, Defaults[.syncEnabled] {
+        Task { [weak self] in
+          await self?.requestSync(trigger: "rerun", coalesceMutationBurst: false)
+        }
+      }
+    }
+
+    guard Defaults[.syncEnabled] else { return }
     guard !Defaults[.encryptionEnabled] || !isLocked else { return }
 
-    isSyncInProgress = true
-    defer { isSyncInProgress = false }
+    var shouldCoalesce = initialCoalesce
+    var passIndex = 0
+    var stalePassCount = 0
+
+    while !Task.isCancelled && (needsAnotherPass || !pendingTriggers.isEmpty) {
+      guard Defaults[.syncEnabled] else { return }
+      guard !Defaults[.encryptionEnabled] || !isLocked else { return }
+
+      if shouldCoalesce {
+        try? await Task.sleep(for: .milliseconds(250))
+      }
+
+      shouldCoalesce = false
+      needsAnotherPass = false
+
+      let triggers = pendingTriggers.sorted()
+      pendingTriggers.removeAll()
+      let trigger = triggers.isEmpty ? "unknown" : triggers.joined(separator: ",")
+
+      passIndex += 1
+      diagnosticsPassCount += 1
+      let startedAt = Date.now
+      let revisionAtPassStart = localMutationRevision
+      logger.info(
+        "Sync pass \(passIndex) start trigger='\(trigger)' revision=\(revisionAtPassStart) coalescedTriggers=\(coalescedTriggerCount)"
+      )
+
+      let result = await runSyncPass(trigger: trigger, revisionAtPassStart: revisionAtPassStart)
+      let durationMs = Int(Date.now.timeIntervalSince(startedAt) * 1_000)
+
+      switch result {
+      case .success:
+        logger.info("Sync pass \(passIndex) end status=success durationMs=\(durationMs)")
+      case .staleMutationDetected:
+        stalePassCount += 1
+        diagnosticsStalePassCount += 1
+        needsAnotherPass = true
+        logger.notice(
+          "Sync pass \(passIndex) end status=stale durationMs=\(durationMs) revisionNow=\(localMutationRevision)"
+        )
+      case .skipped:
+        logger.notice("Sync pass \(passIndex) end status=skipped durationMs=\(durationMs)")
+        return
+      }
+    }
+
+    if stalePassCount > 0 {
+      logger.notice("Sync drain completed with stalePasses=\(stalePassCount)")
+    }
+    coalescedTriggerCount = 0
+  }
+
+  func waitForSyncIdle(maxWait seconds: TimeInterval = 5.0) async -> Bool {
+    let deadline = Date.now.addingTimeInterval(seconds)
+    while syncTask != nil || isSyncInProgress || needsAnotherPass || !pendingTriggers.isEmpty {
+      if Date.now >= deadline {
+        return false
+      }
+      try? await Task.sleep(for: .milliseconds(20))
+    }
+    return true
+  }
+
+  private func runSyncPass(trigger: String, revisionAtPassStart: UInt64) async -> SyncPassResult {
+    guard Defaults[.syncEnabled] else { return .skipped }
+    guard !Defaults[.encryptionEnabled] || !isLocked else { return .skipped }
 
     do {
       try await hydrateLocalVaultCredentialsFromCloudIfNeeded()
@@ -573,6 +714,15 @@ class SyncEncryptionManager {
       let remote = try await fetchRemoteSnapshot()
       var merged = merge(local: local, remote: remote)
       resolveTagNameConflicts(&merged)
+
+      if revisionAtPassStart != localMutationRevision {
+        logger.notice(
+          "Skipping stale sync pass trigger='\(trigger)' revisionStart=\(revisionAtPassStart) revisionNow=\(localMutationRevision)"
+        )
+        return .staleMutationDetected
+      }
+
+      logger.debug("Applying merged snapshot items=\(merged.items.count) tags=\(merged.tags.count) trigger='\(trigger)'")
       applySnapshotToRuntime(merged)
 
       if Defaults[.encryptionEnabled] {
@@ -586,11 +736,13 @@ class SyncEncryptionManager {
       Task {
         try? await History.shared.load()
       }
+      return .success
     } catch {
       let syncStatus = mapCloudError(error)
       Defaults[.cloudSyncStatus] = syncStatus
       statusText = cloudErrorStatusText(syncStatus, error: error)
-      NSLog("[Maccy] Cloud sync failed (\(trigger)): \(describeCloudError(error))")
+      logger.error("Cloud sync failed trigger='\(trigger)' \(self.describeCloudError(error))")
+      return .success
     }
   }
 
@@ -741,9 +893,15 @@ class SyncEncryptionManager {
     var tags = local.tags
     for (id, remoteTag) in remote.tags {
       if let localTag = tags[id] {
-        if remoteTag.updatedAt > localTag.updatedAt {
-          tags[id] = remoteTag
+        if localTag.isDeleted || remoteTag.isDeleted {
+          var deleted = localTag.isDeleted ? localTag : remoteTag
+          deleted.isDeleted = true
+          deleted.updatedAt = max(localTag.updatedAt, remoteTag.updatedAt)
+          tags[id] = deleted
+          continue
         }
+
+        tags[id] = remoteTag.updatedAt > localTag.updatedAt ? remoteTag : localTag
       } else {
         tags[id] = remoteTag
       }
@@ -752,6 +910,22 @@ class SyncEncryptionManager {
     var items = local.items
     for (id, remoteItem) in remote.items {
       if let localItem = items[id] {
+        if localItem.isDeleted || remoteItem.isDeleted {
+          var deleted = localItem.isDeleted ? localItem : remoteItem
+          deleted.isDeleted = true
+          deleted.updatedAt = max(localItem.updatedAt, remoteItem.updatedAt)
+          deleted.tagAssignmentUpdatedAt = max(localItem.tagAssignmentUpdatedAt, remoteItem.tagAssignmentUpdatedAt)
+          deleted.application = nil
+          deleted.numberOfCopies = 0
+          deleted.pin = nil
+          deleted.tagID = nil
+          deleted.title = ""
+          deleted.contents = []
+          deleted.shared = false
+          items[id] = deleted
+          continue
+        }
+
         var winner = localItem.updatedAt >= remoteItem.updatedAt ? localItem : remoteItem
         if localItem.tagAssignmentUpdatedAt > winner.tagAssignmentUpdatedAt {
           winner.tagID = localItem.tagID
@@ -761,15 +935,15 @@ class SyncEncryptionManager {
           winner.tagID = remoteItem.tagID
           winner.tagAssignmentUpdatedAt = remoteItem.tagAssignmentUpdatedAt
         }
-        if (remoteItem.isDeleted && remoteItem.updatedAt >= winner.updatedAt) ||
-            (localItem.isDeleted && localItem.updatedAt >= winner.updatedAt) {
-          winner.isDeleted = true
-        }
         items[id] = winner
       } else {
         items[id] = remoteItem
       }
     }
+
+    let deletedItemCount = items.values.filter(\.isDeleted).count
+    let deletedTagCount = tags.values.filter(\.isDeleted).count
+    logger.debug("Merged snapshot items=\(items.count) deletedItems=\(deletedItemCount) tags=\(tags.count) deletedTags=\(deletedTagCount)")
 
     return SyncSnapshot(items: items, tags: tags)
   }

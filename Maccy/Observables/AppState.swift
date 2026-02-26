@@ -946,6 +946,7 @@ class AppState: Sendable {
   @MainActor
   func deleteSelection() {
     guard let leadItem = navigator.leadHistoryItem else { return }
+    let selectedItems = navigator.selection.items
     let nextUnselectedItem: HistoryItemDecorator?
     if shelfModeEnabled {
       nextUnselectedItem = history.items.item(after: leadItem) { $0.isVisible && !$0.isSelected }
@@ -955,9 +956,7 @@ class AppState: Sendable {
     }
 
     withTransaction(Transaction()) {
-      navigator.selection.forEach { _, item in
-        history.delete(item)
-      }
+      history.delete(selectedItems)
       navigator.select(item: nextUnselectedItem)
     }
   }

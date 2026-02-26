@@ -257,7 +257,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       Storage.shared.context.processPendingChanges()
       try? Storage.shared.context.save()
 
-      removedIDs.forEach { SyncEncryptionManager.shared.recordDeletedItem(id: $0) }
+      SyncEncryptionManager.shared.recordDeletedItems(ids: removedIDs)
     }
 
     Clipboard.shared.clear()
@@ -286,7 +286,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       Storage.shared.context.processPendingChanges()
       try? Storage.shared.context.save()
 
-      removedIDs.forEach { SyncEncryptionManager.shared.recordDeletedItem(id: $0) }
+      SyncEncryptionManager.shared.recordDeletedItems(ids: removedIDs)
     }
 
     Clipboard.shared.clear()
@@ -300,21 +300,34 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   @MainActor
   func delete(_ item: HistoryItemDecorator?) {
     guard let item else { return }
+    delete([item])
+  }
 
-    cleanup(item)
-    let deletedID = item.item.id
-    withLogging("Removing history item") {
-      Storage.shared.context.delete(item.item)
+  @MainActor
+  func delete(_ itemsToDelete: [HistoryItemDecorator]) {
+    guard !itemsToDelete.isEmpty else { return }
+
+    let ids = Set(itemsToDelete.map(\.id))
+    let existingItems = all.filter { ids.contains($0.id) }
+    guard !existingItems.isEmpty else { return }
+
+    existingItems.forEach(cleanup)
+    let deletedIDs = existingItems.map(\.id)
+
+    withLogging("Removing \(existingItems.count) history items") {
+      for item in existingItems {
+        Storage.shared.context.delete(item.item)
+      }
       Storage.shared.context.processPendingChanges()
       try? Storage.shared.context.save()
     }
 
-    all.removeAll { $0 == item }
-    sessionLog.removeValues { $0 == item.item }
+    all.removeAll { ids.contains($0.id) }
+    sessionLog.removeValues { ids.contains($0.id) }
 
     applyCurrentFilters()
     updateUnpinnedShortcuts()
-    SyncEncryptionManager.shared.recordDeletedItem(id: deletedID)
+    SyncEncryptionManager.shared.recordDeletedItems(ids: deletedIDs)
     SyncEncryptionManager.shared.handleHistoryMutation()
     Task {
       AppState.shared.popup.needsResize = true

@@ -1,5 +1,7 @@
 import AppKit
+import CloudKit
 import Defaults
+import SwiftData
 import XCTest
 @testable import Maccy
 
@@ -518,5 +520,324 @@ final class ShelfPreviewPlacementTests: XCTestCase {
 
     XCTAssertFalse(placement.isValid)
     XCTAssertFalse(placement.selectedCardIsFullyVisible)
+  }
+}
+
+private struct RemoteHistoryContentSnapshot: Codable {
+  var type: String
+  var value: Data?
+}
+
+private struct RemoteHistoryItemSnapshot: Codable {
+  var id: UUID
+  var application: String?
+  var firstCopiedAt: Date
+  var lastCopiedAt: Date
+  var updatedAt: Date
+  var tagAssignmentUpdatedAt: Date
+  var numberOfCopies: Int
+  var pin: String?
+  var tagID: UUID?
+  var title: String
+  var contents: [RemoteHistoryContentSnapshot]
+  var isDeleted: Bool
+  var shared: Bool
+}
+
+private final class MockCloudKitHistoryStore: CloudKitHistoryStore {
+  private(set) var itemRecords: [CKRecord]
+  private(set) var tagRecords: [CKRecord]
+  private(set) var saveCount = 0
+  var fetchItemDelay: TimeInterval = 0
+  var onItemFetch: (() -> Void)?
+
+  init(itemRecords: [CKRecord] = [], tagRecords: [CKRecord] = []) {
+    self.itemRecords = itemRecords
+    self.tagRecords = tagRecords
+  }
+
+  func fetchItemRecords() async throws -> [CKRecord] {
+    onItemFetch?()
+    if fetchItemDelay > 0 {
+      try? await Task.sleep(for: .milliseconds(Int(fetchItemDelay * 1_000)))
+    }
+    return itemRecords
+  }
+
+  func fetchTagRecords() async throws -> [CKRecord] {
+    return tagRecords
+  }
+
+  func fetchVaultMetadataRecord() async throws -> CKRecord? {
+    return nil
+  }
+
+  func save(records: [CKRecord]) async throws {
+    saveCount += 1
+    for record in records {
+      switch record.recordType {
+      case "MaccyEncryptedItem":
+        upsert(record: record, records: &itemRecords)
+      case "MaccyEncryptedTag":
+        upsert(record: record, records: &tagRecords)
+      default:
+        continue
+      }
+    }
+  }
+
+  func itemSnapshot(id: UUID) -> RemoteHistoryItemSnapshot? {
+    let recordName = "item-\(id)"
+    guard let record = itemRecords.first(where: { $0.recordID.recordName == recordName }),
+          let blob = record["blob"] as? Data else {
+      return nil
+    }
+
+    return try? JSONDecoder().decode(RemoteHistoryItemSnapshot.self, from: blob)
+  }
+
+  private func upsert(record: CKRecord, records: inout [CKRecord]) {
+    if let index = records.firstIndex(where: { $0.recordID == record.recordID }) {
+      records[index] = record
+    } else {
+      records.append(record)
+    }
+  }
+}
+
+@MainActor
+final class SyncReliabilityTests: XCTestCase {
+  private var savedSyncEnabled = false
+  private var savedEncryptionEnabled = false
+  private var savedSyncScope: SyncScope = .all
+  private var savedItemTombstones: Data?
+  private var savedTagTombstones: Data?
+
+  override func setUp() {
+    super.setUp()
+    savedSyncEnabled = Defaults[.syncEnabled]
+    savedEncryptionEnabled = Defaults[.encryptionEnabled]
+    savedSyncScope = Defaults[.syncScope]
+    savedItemTombstones = Defaults[.syncItemTombstones]
+    savedTagTombstones = Defaults[.syncTagTombstones]
+
+    Defaults[.syncEnabled] = true
+    Defaults[.encryptionEnabled] = false
+    Defaults[.syncScope] = .all
+    Defaults[.syncItemTombstones] = nil
+    Defaults[.syncTagTombstones] = nil
+    wipeRuntimeStorage()
+  }
+
+  override func tearDown() {
+    Defaults[.syncEnabled] = savedSyncEnabled
+    Defaults[.encryptionEnabled] = savedEncryptionEnabled
+    Defaults[.syncScope] = savedSyncScope
+    Defaults[.syncItemTombstones] = savedItemTombstones
+    Defaults[.syncTagTombstones] = savedTagTombstones
+    wipeRuntimeStorage()
+    super.tearDown()
+  }
+
+  func testDeleteDuringInFlightSyncDoesNotResurrectItem() async {
+    let id = UUID()
+    let item = insertItem(id: id, text: "keep")
+    let remoteRecord = makeRemoteRecord(item: item)
+    let store = MockCloudKitHistoryStore(itemRecords: [remoteRecord])
+    store.fetchItemDelay = 0.25
+
+    let fetchStarted = expectation(description: "fetch started")
+    store.onItemFetch = { fetchStarted.fulfill() }
+
+    let manager = SyncEncryptionManager(cloudStore: store, configureSyncObservers: false)
+    await manager.requestSync(trigger: "manual", coalesceMutationBurst: false)
+    await fulfillment(of: [fetchStarted], timeout: 2.0)
+
+    if let local = findItem(id: id) {
+      Storage.shared.context.delete(local)
+      Storage.shared.context.processPendingChanges()
+      try? Storage.shared.context.save()
+    }
+    manager.recordDeletedItem(id: id)
+    manager.handleHistoryMutation()
+
+    let isIdle = await manager.waitForSyncIdle(maxWait: 5.0)
+    XCTAssertTrue(isIdle)
+    XCTAssertNil(findItem(id: id))
+    XCTAssertEqual(store.itemSnapshot(id: id)?.isDeleted, true)
+    XCTAssertGreaterThan(manager.diagnosticsStalePassCount, 0)
+  }
+
+  func testBurstDeletesCoalesceAndFullyConverge() async {
+    let ids = (0..<40).map { _ in UUID() }
+    let localItems = ids.map { insertItem(id: $0, text: "item-\($0.uuidString.prefix(4))") }
+    let remoteRecords = localItems.map(makeRemoteRecord)
+    let store = MockCloudKitHistoryStore(itemRecords: remoteRecords)
+    let manager = SyncEncryptionManager(cloudStore: store, configureSyncObservers: false)
+
+    for item in localItems {
+      Storage.shared.context.delete(item)
+    }
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+
+    for id in ids {
+      manager.recordDeletedItem(id: id)
+      manager.handleHistoryMutation()
+    }
+
+    let isIdle = await manager.waitForSyncIdle(maxWait: 8.0)
+    XCTAssertTrue(isIdle)
+    let remaining = (try? Storage.shared.context.fetch(FetchDescriptor<HistoryItem>()).count) ?? 0
+    XCTAssertEqual(remaining, 0)
+    XCTAssertTrue(ids.allSatisfy { store.itemSnapshot(id: $0)?.isDeleted == true })
+    XCTAssertLessThan(store.saveCount, ids.count)
+  }
+
+  func testNoDroppedSyncTriggerWhilePassInProgress() async {
+    let id = UUID()
+    let item = insertItem(id: id, text: "original")
+    let store = MockCloudKitHistoryStore(itemRecords: [makeRemoteRecord(item: item)])
+    store.fetchItemDelay = 0.3
+
+    let fetchStarted = expectation(description: "fetch started")
+    store.onItemFetch = { fetchStarted.fulfill() }
+
+    let manager = SyncEncryptionManager(cloudStore: store, configureSyncObservers: false)
+    await manager.requestSync(trigger: "manual", coalesceMutationBurst: false)
+    await fulfillment(of: [fetchStarted], timeout: 2.0)
+
+    if let local = findItem(id: id) {
+      local.title = "updated"
+      local.updatedAt = Date.now.addingTimeInterval(10)
+      Storage.shared.context.processPendingChanges()
+      try? Storage.shared.context.save()
+    }
+    manager.handleHistoryMutation()
+
+    let isIdle = await manager.waitForSyncIdle(maxWait: 5.0)
+    XCTAssertTrue(isIdle)
+    XCTAssertGreaterThanOrEqual(manager.diagnosticsPassCount, 2)
+    XCTAssertEqual(store.itemSnapshot(id: id)?.title, "updated")
+    XCTAssertEqual(store.itemSnapshot(id: id)?.isDeleted, false)
+  }
+
+  func testDeleteWinsAgainstConcurrentRemoteUpdateSameID() async {
+    let id = UUID()
+    let localItem = insertItem(id: id, text: "local")
+    let remoteUpdatedRecord = makeRemoteRecord(
+      id: id,
+      text: "remote-newer",
+      updatedAt: Date.now.addingTimeInterval(120),
+      isDeleted: false
+    )
+    let store = MockCloudKitHistoryStore(itemRecords: [remoteUpdatedRecord])
+    let manager = SyncEncryptionManager(cloudStore: store, configureSyncObservers: false)
+
+    Storage.shared.context.delete(localItem)
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+    manager.recordDeletedItem(id: id)
+    manager.handleHistoryMutation()
+
+    let isIdle = await manager.waitForSyncIdle(maxWait: 5.0)
+    XCTAssertTrue(isIdle)
+    XCTAssertNil(findItem(id: id))
+    XCTAssertEqual(store.itemSnapshot(id: id)?.isDeleted, true)
+  }
+
+  func testBulkDeleteEmitsSingleMutationSyncTrigger() async {
+    let ids = (0..<12).map { _ in UUID() }
+    let localItems = ids.map { insertItem(id: $0, text: "bulk-\($0.uuidString.prefix(4))") }
+    let store = MockCloudKitHistoryStore(itemRecords: localItems.map(makeRemoteRecord))
+    let manager = SyncEncryptionManager(cloudStore: store, configureSyncObservers: false)
+
+    for item in localItems {
+      Storage.shared.context.delete(item)
+    }
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+
+    manager.recordDeletedItems(ids: ids)
+    manager.handleHistoryMutation()
+
+    let isIdle = await manager.waitForSyncIdle(maxWait: 5.0)
+    XCTAssertTrue(isIdle)
+    XCTAssertEqual(manager.diagnosticsPassCount, 1)
+    XCTAssertEqual(store.saveCount, 1)
+    XCTAssertTrue(ids.allSatisfy { store.itemSnapshot(id: $0)?.isDeleted == true })
+  }
+
+  private func wipeRuntimeStorage() {
+    try? Storage.shared.context.delete(model: HistoryItem.self)
+    try? Storage.shared.context.delete(model: HistoryTag.self)
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+  }
+
+  @discardableResult
+  private func insertItem(id: UUID, text: String) -> HistoryItem {
+    let now = Date.now
+    let item = HistoryItem(
+      contents: [HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue, value: Data(text.utf8))]
+    )
+    item.id = id
+    item.title = text
+    item.firstCopiedAt = now
+    item.lastCopiedAt = now
+    item.updatedAt = now
+    item.tagAssignmentUpdatedAt = now
+    Storage.shared.context.insert(item)
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+    return item
+  }
+
+  private func findItem(id: UUID) -> HistoryItem? {
+    let descriptor = FetchDescriptor<HistoryItem>(
+      predicate: #Predicate { $0.id == id }
+    )
+    return try? Storage.shared.context.fetch(descriptor).first
+  }
+
+  private func makeRemoteRecord(item: HistoryItem) -> CKRecord {
+    makeRemoteRecord(
+      id: item.id,
+      text: item.title,
+      updatedAt: item.updatedAt,
+      isDeleted: false
+    )
+  }
+
+  private func makeRemoteRecord(
+    id: UUID,
+    text: String,
+    updatedAt: Date,
+    isDeleted: Bool
+  ) -> CKRecord {
+    let snapshot = RemoteHistoryItemSnapshot(
+      id: id,
+      application: nil,
+      firstCopiedAt: updatedAt,
+      lastCopiedAt: updatedAt,
+      updatedAt: updatedAt,
+      tagAssignmentUpdatedAt: updatedAt,
+      numberOfCopies: isDeleted ? 0 : 1,
+      pin: nil,
+      tagID: nil,
+      title: isDeleted ? "" : text,
+      contents: isDeleted ? [] : [RemoteHistoryContentSnapshot(type: NSPasteboard.PasteboardType.string.rawValue, value: Data(text.utf8))],
+      isDeleted: isDeleted,
+      shared: !isDeleted
+    )
+
+    let zoneID = CKRecordZone.ID(zoneName: "MaccyHistoryZone", ownerName: CKCurrentUserDefaultName)
+    let recordID = CKRecord.ID(recordName: "item-\(id)", zoneID: zoneID)
+    let record = CKRecord(recordType: "MaccyEncryptedItem", recordID: recordID)
+    if let payload = try? JSONEncoder().encode(snapshot) {
+      record["blob"] = payload as CKRecordValue
+    }
+    record["encrypted"] = NSNumber(booleanLiteral: false)
+    return record
   }
 }
