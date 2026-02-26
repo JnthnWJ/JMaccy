@@ -396,6 +396,12 @@ class SyncEncryptionManager {
     handleHistoryMutation()
   }
 
+  func manualSyncFromUI() {
+    Task { [weak self] in
+      await self?.reconcileAndSync(trigger: "manual")
+    }
+  }
+
   func enableEncryptionFromUI() {
     Task { [weak self] in
       await self?.enableEncryptionFlowFromUI()

@@ -157,6 +157,26 @@ struct StorageSettingsPane: View {
           .controlSize(.small)
           .foregroundStyle(.gray)
 
+        HStack {
+          Button(action: {
+            syncManager.manualSyncFromUI()
+          }, label: {
+            Text("Sync now")
+          })
+          .disabled(
+            !syncEnabled ||
+              syncManager.isSyncInProgress ||
+              (encryptionEnabled && syncManager.isLocked)
+          )
+
+          if syncManager.isSyncInProgress {
+            ProgressView()
+              .controlSize(.small)
+          }
+
+          Spacer()
+        }
+
         Toggle(isOn: $encryptionEnabled) {
           Text("EnableEncryption", tableName: "StorageSettings")
         }
