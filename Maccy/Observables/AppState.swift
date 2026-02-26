@@ -104,6 +104,41 @@ private final class ShelfImageEditSession {
   }
 }
 
+struct ShelfPreviewPlacement {
+  let frame: NSRect
+  let pointerX: CGFloat
+  let isValid: Bool
+  let selectedCardIsFullyVisible: Bool
+
+  static let invalid = ShelfPreviewPlacement(
+    frame: .zero,
+    pointerX: 0,
+    isValid: false,
+    selectedCardIsFullyVisible: false
+  )
+}
+
+enum ShelfPreviewLayoutMetrics {
+  static let screenMargin: CGFloat = 12
+  static let pointerWidth: CGFloat = 42
+  static let pointerHeight: CGFloat = 16
+  static let pointerHorizontalInset: CGFloat = 10
+  static let pointerVerticalOffset: CGFloat = -0.5
+  static let pointerContainerHeight: CGFloat = 15
+  static let pointerBorderGapInset: CGFloat = 4
+  static let pointerBorderGapHeight: CGFloat = 2
+  static let popupOuterPadding: CGFloat = 6
+  static let pointerTouchGap: CGFloat = 0
+
+  static var pointerCenterInset: CGFloat {
+    pointerHorizontalInset + pointerWidth / 2
+  }
+
+  static var pointerTipOffsetFromWindowBottom: CGFloat {
+    popupOuterPadding + pointerContainerHeight - (pointerHeight + pointerVerticalOffset)
+  }
+}
+
 @Observable
 class ShelfPreview {
   var isOpen = false
@@ -112,6 +147,7 @@ class ShelfPreview {
   var editingText = ""
 
   @ObservationIgnored private var cardFrames: [UUID: NSRect] = [:]
+  @ObservationIgnored private var carouselViewportFrame: NSRect?
   @ObservationIgnored private var currentItemID: UUID?
   @ObservationIgnored private var editingItemID: UUID?
 
@@ -144,10 +180,7 @@ class ShelfPreview {
 
   func updateCardFrame(itemID: UUID, frame: NSRect) {
     if let current = cardFrames[itemID],
-       abs(current.origin.x - frame.origin.x) < 0.25,
-       abs(current.origin.y - frame.origin.y) < 0.25,
-       abs(current.size.width - frame.size.width) < 0.25,
-       abs(current.size.height - frame.size.height) < 0.25 {
+       Self.rectsNearlyEqual(current, frame, tolerance: 0.25) {
       return
     }
 
@@ -157,7 +190,7 @@ class ShelfPreview {
       return
     }
 
-    refreshPreviewPanel(animated: true)
+    refreshPreviewPanel(animated: false)
   }
 
   func removeCardFrame(itemID: UUID) {
@@ -167,7 +200,33 @@ class ShelfPreview {
       return
     }
 
-    refreshPreviewPanel(animated: true)
+    refreshPreviewPanel(animated: false)
+  }
+
+  func updateCarouselViewportFrame(_ frame: NSRect?) {
+    if Self.rectsNearlyEqual(carouselViewportFrame, frame, tolerance: 0.25) {
+      return
+    }
+
+    carouselViewportFrame = frame
+
+    guard isOpen else {
+      return
+    }
+
+    refreshPreviewPanel(animated: false)
+  }
+
+  func clearCarouselViewportFrame() {
+    updateCarouselViewportFrame(nil)
+  }
+
+  func selectedCardIsFullyVisible() -> Bool {
+    guard let currentItemID,
+          let frame = cardFrames[currentItemID] else {
+      return false
+    }
+    return Self.isCardFullyVisible(frame: frame, in: carouselViewportFrame)
   }
 
   func updateLeadSelection() {
@@ -206,6 +265,11 @@ class ShelfPreview {
     }
 
     currentItemID = AppState.shared.navigator.leadHistoryItem?.id
+    guard selectedCardIsFullyVisible() else {
+      close()
+      return
+    }
+
     isOpen = true
     refreshPreviewPanel(animated: false)
   }
@@ -519,11 +583,33 @@ class ShelfPreview {
     }
 
     currentItemID = item.id
+    guard selectedCardIsFullyVisible() else {
+      close()
+      return
+    }
+
+    let referenceScreen = AppState.shared.appDelegate?.panel.screen?.visibleFrame
+      ?? NSScreen.forPopup?.visibleFrame
+      ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+    let placement = Self.computePreviewPlacement(
+      preferredSize: preferredPreviewSize(for: item, screenFrame: referenceScreen),
+      minimumSize: minimumPreviewSize(for: item, screenFrame: referenceScreen),
+      selectedCardFrame: cardFrames[item.id],
+      carouselViewportFrame: carouselViewportFrame,
+      screenFrame: referenceScreen
+    )
+
+    guard placement.isValid else {
+      close()
+      return
+    }
+
+    pointerX = placement.pointerX
 
     let panel = ensurePreviewPanel()
     panel.updateRootView(makePreviewView())
 
-    let finalFrame = previewFrame(for: item)
+    let finalFrame = placement.frame
 
     if panel.isVisible {
       if animated {
@@ -551,28 +637,6 @@ class ShelfPreview {
     }
   }
 
-  private func previewFrame(for item: HistoryItemDecorator) -> NSRect {
-    let referenceScreen = AppState.shared.appDelegate?.panel.screen?.visibleFrame
-      ?? NSScreen.forPopup?.visibleFrame
-      ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
-
-    var size = preferredPreviewSize(for: item, screenFrame: referenceScreen)
-    size.width = min(size.width, referenceScreen.width - 24)
-    size.height = min(size.height, referenceScreen.height - 24)
-
-    let anchorRect = anchorRect(in: referenceScreen)
-    var originX = anchorRect.midX - size.width / 2
-    originX = max(referenceScreen.minX + 12, min(originX, referenceScreen.maxX - size.width - 12))
-
-    var originY = anchorRect.maxY + 18
-    originY = min(originY, referenceScreen.maxY - size.height - 12)
-    originY = max(originY, referenceScreen.minY + 12)
-
-    pointerX = max(28, min(size.width - 28, anchorRect.midX - originX))
-
-    return NSRect(origin: NSPoint(x: originX, y: originY), size: size)
-  }
-
   private func preferredPreviewSize(for item: HistoryItemDecorator, screenFrame: NSRect) -> NSSize {
     if item.hasImage {
       let width = min(max(760, screenFrame.width * 0.74), 1280)
@@ -582,6 +646,18 @@ class ShelfPreview {
 
     let width = min(max(620, screenFrame.width * 0.52), 980)
     let height = min(max(360, screenFrame.height * 0.45), 680)
+    return NSSize(width: width, height: height)
+  }
+
+  private func minimumPreviewSize(for item: HistoryItemDecorator, screenFrame: NSRect) -> NSSize {
+    if item.hasImage {
+      let width = min(max(520, screenFrame.width * 0.40), 900)
+      let height = min(max(240, screenFrame.height * 0.24), 560)
+      return NSSize(width: width, height: height)
+    }
+
+    let width = min(max(420, screenFrame.width * 0.33), 780)
+    let height = min(max(200, screenFrame.height * 0.22), 460)
     return NSSize(width: width, height: height)
   }
 
@@ -598,40 +674,20 @@ class ShelfPreview {
     let referenceFrame = previewPanel?.frame ?? AppState.shared.appDelegate?.panel.frame ?? screenFrame
 
     var originX = referenceFrame.midX - size.width / 2
-    originX = max(screenFrame.minX + 12, min(originX, screenFrame.maxX - size.width - 12))
+    originX = max(
+      screenFrame.minX + ShelfPreviewLayoutMetrics.screenMargin,
+      min(originX, screenFrame.maxX - size.width - ShelfPreviewLayoutMetrics.screenMargin)
+    )
 
-    var originY = referenceFrame.maxY + 12
-    if originY + size.height > screenFrame.maxY - 12 {
-      originY = referenceFrame.minY - size.height - 12
+    var originY = referenceFrame.maxY + ShelfPreviewLayoutMetrics.screenMargin
+    if originY + size.height > screenFrame.maxY - ShelfPreviewLayoutMetrics.screenMargin {
+      originY = referenceFrame.minY - size.height - ShelfPreviewLayoutMetrics.screenMargin
     }
-    if originY < screenFrame.minY + 12 {
+    if originY < screenFrame.minY + ShelfPreviewLayoutMetrics.screenMargin {
       originY = screenFrame.midY - size.height / 2
     }
 
     return NSRect(x: originX, y: originY, width: size.width, height: size.height)
-  }
-
-  private func anchorRect(in screenFrame: NSRect) -> NSRect {
-    if let currentItemID,
-       let frame = cardFrames[currentItemID] {
-      return frame
-    }
-
-    if let popupFrame = AppState.shared.appDelegate?.panel.frame {
-      return NSRect(
-        x: popupFrame.midX - 1,
-        y: popupFrame.maxY - 1,
-        width: 2,
-        height: 2
-      )
-    }
-
-    return NSRect(
-      x: screenFrame.midX - 1,
-      y: screenFrame.minY + 1,
-      width: 2,
-      height: 2
-    )
   }
 
   private func scaledFrame(from frame: NSRect, scale: CGFloat, yOffset: CGFloat) -> NSRect {
@@ -695,6 +751,99 @@ class ShelfPreview {
       ShelfTextEditorPopupView()
         .environment(AppState.shared)
     )
+  }
+
+  static func computePreviewPlacement(
+    preferredSize: NSSize,
+    minimumSize: NSSize,
+    selectedCardFrame: NSRect?,
+    carouselViewportFrame: NSRect?,
+    screenFrame: NSRect
+  ) -> ShelfPreviewPlacement {
+    guard let selectedCardFrame else {
+      return .invalid
+    }
+
+    let cardFrame = selectedCardFrame.standardized
+    let cardFullyVisible = isCardFullyVisible(frame: cardFrame, in: carouselViewportFrame)
+    guard cardFullyVisible else {
+      return ShelfPreviewPlacement(
+        frame: .zero,
+        pointerX: 0,
+        isValid: false,
+        selectedCardIsFullyVisible: false
+      )
+    }
+
+    let horizontalMargin = ShelfPreviewLayoutMetrics.screenMargin
+    let availableWidth = screenFrame.width - horizontalMargin * 2
+    guard availableWidth > 0 else {
+      return .invalid
+    }
+
+    let clampedMinimumWidth = min(max(1, minimumSize.width), availableWidth)
+    let clampedPreferredWidth = min(max(clampedMinimumWidth, preferredSize.width), availableWidth)
+    guard clampedPreferredWidth > 0 else {
+      return .invalid
+    }
+
+    let originY = cardFrame.maxY - ShelfPreviewLayoutMetrics.pointerTouchGap - ShelfPreviewLayoutMetrics.pointerTipOffsetFromWindowBottom
+    guard originY >= screenFrame.minY + horizontalMargin else {
+      return .invalid
+    }
+
+    let availableHeight = (screenFrame.maxY - horizontalMargin) - originY
+    let height = min(preferredSize.height, availableHeight)
+    guard height > 0 else {
+      return .invalid
+    }
+
+    var originX = cardFrame.midX - clampedPreferredWidth / 2
+    originX = max(screenFrame.minX + horizontalMargin, min(originX, screenFrame.maxX - clampedPreferredWidth - horizontalMargin))
+
+    let pointerInset = ShelfPreviewLayoutMetrics.pointerCenterInset
+    guard clampedPreferredWidth > pointerInset * 2 else {
+      return .invalid
+    }
+
+    let pointerX = max(pointerInset, min(clampedPreferredWidth - pointerInset, cardFrame.midX - originX))
+
+    return ShelfPreviewPlacement(
+      frame: NSRect(x: originX, y: originY, width: clampedPreferredWidth, height: height),
+      pointerX: pointerX,
+      isValid: true,
+      selectedCardIsFullyVisible: true
+    )
+  }
+
+  static func isCardFullyVisible(frame: NSRect, in viewportFrame: NSRect?) -> Bool {
+    guard let viewportFrame else {
+      return true
+    }
+
+    let normalizedViewport = viewportFrame.standardized
+    let normalizedCard = frame.standardized
+    let epsilon: CGFloat = 0.5
+    let adjustedCard = normalizedCard.insetBy(dx: epsilon, dy: epsilon)
+    return normalizedViewport.contains(adjustedCard)
+  }
+
+  private static func rectsNearlyEqual(_ lhs: NSRect, _ rhs: NSRect, tolerance: CGFloat) -> Bool {
+    abs(lhs.origin.x - rhs.origin.x) < tolerance
+      && abs(lhs.origin.y - rhs.origin.y) < tolerance
+      && abs(lhs.size.width - rhs.size.width) < tolerance
+      && abs(lhs.size.height - rhs.size.height) < tolerance
+  }
+
+  private static func rectsNearlyEqual(_ lhs: NSRect?, _ rhs: NSRect?, tolerance: CGFloat) -> Bool {
+    switch (lhs, rhs) {
+    case (nil, nil):
+      true
+    case let (lhsRect?, rhsRect?):
+      rectsNearlyEqual(lhsRect, rhsRect, tolerance: tolerance)
+    default:
+      false
+    }
   }
 }
 

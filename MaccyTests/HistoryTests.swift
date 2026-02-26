@@ -456,3 +456,67 @@ class HistoryTests: XCTestCase {
     RunLoop.main.run(until: Date().addingTimeInterval(0.35))
   }
 }
+
+final class ShelfPreviewPlacementTests: XCTestCase {
+  func testPlacementCentersPointerWhenAnchorHasRoom() {
+    let placement = ShelfPreview.computePreviewPlacement(
+      preferredSize: NSSize(width: 700, height: 460),
+      minimumSize: NSSize(width: 420, height: 200),
+      selectedCardFrame: NSRect(x: 600, y: 60, width: 260, height: 220),
+      carouselViewportFrame: NSRect(x: 0, y: 0, width: 1600, height: 300),
+      screenFrame: NSRect(x: 0, y: 0, width: 1600, height: 900)
+    )
+
+    XCTAssertTrue(placement.isValid)
+    XCTAssertTrue(placement.selectedCardIsFullyVisible)
+    XCTAssertEqual(placement.frame.origin.x, 380, accuracy: 0.01)
+    XCTAssertEqual(placement.pointerX, 350, accuracy: 0.01)
+  }
+
+  func testPlacementClampsPointerNearLeftEdge() {
+    let placement = ShelfPreview.computePreviewPlacement(
+      preferredSize: NSSize(width: 700, height: 460),
+      minimumSize: NSSize(width: 420, height: 200),
+      selectedCardFrame: NSRect(x: 0, y: 60, width: 40, height: 220),
+      carouselViewportFrame: NSRect(x: 0, y: 0, width: 1600, height: 300),
+      screenFrame: NSRect(x: 0, y: 0, width: 1600, height: 900)
+    )
+
+    XCTAssertTrue(placement.isValid)
+    XCTAssertEqual(placement.frame.minX, ShelfPreviewLayoutMetrics.screenMargin, accuracy: 0.01)
+    XCTAssertEqual(placement.pointerX, ShelfPreviewLayoutMetrics.pointerCenterInset, accuracy: 0.01)
+  }
+
+  func testPlacementShrinksHeightWhenVerticalSpaceIsLimited() {
+    let screenFrame = NSRect(x: 0, y: 0, width: 1200, height: 500)
+    let cardFrame = NSRect(x: 470, y: 60, width: 260, height: 220)
+    let placement = ShelfPreview.computePreviewPlacement(
+      preferredSize: NSSize(width: 700, height: 360),
+      minimumSize: NSSize(width: 420, height: 200),
+      selectedCardFrame: cardFrame,
+      carouselViewportFrame: NSRect(x: 0, y: 0, width: 1200, height: 320),
+      screenFrame: screenFrame
+    )
+
+    let expectedOriginY = cardFrame.maxY - ShelfPreviewLayoutMetrics.pointerTipOffsetFromWindowBottom
+    let expectedAvailableHeight = screenFrame.maxY - ShelfPreviewLayoutMetrics.screenMargin - expectedOriginY
+
+    XCTAssertTrue(placement.isValid)
+    XCTAssertEqual(placement.frame.minY, expectedOriginY, accuracy: 0.01)
+    XCTAssertEqual(placement.frame.height, expectedAvailableHeight, accuracy: 0.01)
+    XCTAssertLessThan(placement.frame.height, 360)
+  }
+
+  func testPlacementIsInvalidWhenSelectedCardIsPartiallyOutsideViewport() {
+    let placement = ShelfPreview.computePreviewPlacement(
+      preferredSize: NSSize(width: 700, height: 460),
+      minimumSize: NSSize(width: 420, height: 200),
+      selectedCardFrame: NSRect(x: 460, y: 60, width: 90, height: 220),
+      carouselViewportFrame: NSRect(x: 100, y: 0, width: 400, height: 300),
+      screenFrame: NSRect(x: 0, y: 0, width: 1600, height: 900)
+    )
+
+    XCTAssertFalse(placement.isValid)
+    XCTAssertFalse(placement.selectedCardIsFullyVisible)
+  }
+}

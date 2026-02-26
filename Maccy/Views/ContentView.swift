@@ -936,6 +936,7 @@ private struct ShelfCardFrameReporter: NSViewRepresentable {
   }
 
   static func dismantleNSView(_ nsView: ReporterView, coordinator: ()) {
+    nsView.teardown()
     if let itemID = nsView.itemID {
       AppState.shared.shelfPreview.removeCardFrame(itemID: itemID)
     }
@@ -944,20 +945,62 @@ private struct ShelfCardFrameReporter: NSViewRepresentable {
   final class ReporterView: NSView {
     weak var appState: AppState?
     var itemID: UUID?
+    private weak var observedClipView: NSClipView?
+    private var clipBoundsObserver: NSObjectProtocol?
+
+    deinit {
+      stopObservingClipBounds()
+    }
 
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()
+      configureClipObservation()
       reportFrame()
     }
 
     override func viewDidMoveToSuperview() {
       super.viewDidMoveToSuperview()
+      configureClipObservation()
       reportFrame()
     }
 
     override func layout() {
       super.layout()
       reportFrame()
+    }
+
+    func teardown() {
+      stopObservingClipBounds()
+    }
+
+    private func configureClipObservation() {
+      guard let clipView = enclosingScrollView?.contentView else {
+        stopObservingClipBounds()
+        return
+      }
+
+      guard observedClipView !== clipView else {
+        return
+      }
+
+      stopObservingClipBounds()
+      observedClipView = clipView
+      clipView.postsBoundsChangedNotifications = true
+      clipBoundsObserver = NotificationCenter.default.addObserver(
+        forName: NSView.boundsDidChangeNotification,
+        object: clipView,
+        queue: .main
+      ) { [weak self] _ in
+        self?.reportFrame()
+      }
+    }
+
+    private func stopObservingClipBounds() {
+      if let clipBoundsObserver {
+        NotificationCenter.default.removeObserver(clipBoundsObserver)
+        self.clipBoundsObserver = nil
+      }
+      observedClipView = nil
     }
 
     func reportFrame() {
@@ -1013,6 +1056,7 @@ private struct ShelfWheelBridge: NSViewRepresentable {
   final class Coordinator {
     private weak var scrollView: NSScrollView?
     private var monitor: Any?
+    private var clipBoundsObserver: NSObjectProtocol?
 
     deinit {
       detach()
@@ -1021,11 +1065,16 @@ private struct ShelfWheelBridge: NSViewRepresentable {
     func attach(to view: NSView) {
       guard let scrollView = findScrollView(from: view) else { return }
 
-      self.scrollView = scrollView
-      scrollView.hasHorizontalScroller = false
-      scrollView.hasVerticalScroller = false
+      if self.scrollView !== scrollView {
+        stopObservingClipBounds()
+        self.scrollView = scrollView
+        scrollView.hasHorizontalScroller = false
+        scrollView.hasVerticalScroller = false
+        observeClipBounds(of: scrollView)
+      }
 
       installMonitor()
+      updateViewportFrame()
     }
 
     func detach() {
@@ -1033,7 +1082,40 @@ private struct ShelfWheelBridge: NSViewRepresentable {
         NSEvent.removeMonitor(monitor)
         self.monitor = nil
       }
+      stopObservingClipBounds()
+      AppState.shared.shelfPreview.clearCarouselViewportFrame()
       scrollView = nil
+    }
+
+    private func observeClipBounds(of scrollView: NSScrollView) {
+      let clipView = scrollView.contentView
+      clipView.postsBoundsChangedNotifications = true
+      clipBoundsObserver = NotificationCenter.default.addObserver(
+        forName: NSView.boundsDidChangeNotification,
+        object: clipView,
+        queue: .main
+      ) { [weak self] _ in
+        self?.updateViewportFrame()
+      }
+    }
+
+    private func stopObservingClipBounds() {
+      if let clipBoundsObserver {
+        NotificationCenter.default.removeObserver(clipBoundsObserver)
+        self.clipBoundsObserver = nil
+      }
+    }
+
+    private func updateViewportFrame() {
+      guard let scrollView,
+            let window = scrollView.window else {
+        return
+      }
+
+      let clipView = scrollView.contentView
+      let viewportInWindow = clipView.convert(clipView.bounds, to: nil)
+      let viewportInScreen = window.convertToScreen(viewportInWindow)
+      AppState.shared.shelfPreview.updateCarouselViewportFrame(viewportInScreen)
     }
 
     private func installMonitor() {
@@ -1083,6 +1165,7 @@ private struct ShelfWheelBridge: NSViewRepresentable {
         origin.x = newX
         scrollView.contentView.setBoundsOrigin(origin)
         scrollView.reflectScrolledClipView(scrollView.contentView)
+        self.updateViewportFrame()
 
         return nil
       }
@@ -1189,15 +1272,6 @@ private struct ShelfPreviewPointerOutlineShape: Shape {
   }
 }
 
-private enum ShelfPreviewPointerMetrics {
-  static let width: CGFloat = 42
-  static let height: CGFloat = 16
-  static let inset: CGFloat = 10
-  static let yOffset: CGFloat = -0.5
-  static let borderGapInset: CGFloat = 4
-  static let borderGapHeight: CGFloat = 2
-}
-
 struct ShelfPreviewPopupView: View {
   @Environment(AppState.self) private var appState
 
@@ -1237,6 +1311,28 @@ struct ShelfPreviewPopupView: View {
       pluralized(stats.words, singular: "word", plural: "words"),
       pluralized(stats.lines, singular: "line", plural: "lines")
     ].joined(separator: "  ·  ")
+  }
+
+  private func clampedPointerCenterX(totalWidth: CGFloat) -> CGFloat {
+    let inset = ShelfPreviewLayoutMetrics.pointerCenterInset
+    return max(inset, min(appState.shelfPreview.pointerX, totalWidth - inset))
+  }
+
+  private func pointerOffset(totalWidth: CGFloat) -> CGFloat {
+    clampedPointerCenterX(totalWidth: totalWidth) - ShelfPreviewLayoutMetrics.pointerWidth / 2
+  }
+
+  private func pointerTipProbe(in size: CGSize) -> some View {
+    let tipX = clampedPointerCenterX(totalWidth: size.width)
+    let tipY = size.height - ShelfPreviewLayoutMetrics.pointerTipOffsetFromWindowBottom
+
+    return Color.black.opacity(0.001)
+      .frame(width: 2, height: 2)
+      .position(x: tipX, y: tipY)
+      .accessibilityElement()
+      .accessibilityLabel("Pointer Tip")
+      .accessibilityIdentifier("shelf-preview-pointer-tip")
+      .allowsHitTesting(false)
   }
 
   @ViewBuilder
@@ -1355,22 +1451,17 @@ struct ShelfPreviewPopupView: View {
       .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
       .overlay {
         GeometryReader { geo in
-          let pointerOffset = max(
-            ShelfPreviewPointerMetrics.inset,
-            min(
-              appState.shelfPreview.pointerX - ShelfPreviewPointerMetrics.width / 2,
-              geo.size.width - ShelfPreviewPointerMetrics.width - ShelfPreviewPointerMetrics.inset
-            )
-          )
-          let borderGapWidth = ShelfPreviewPointerMetrics.width - (ShelfPreviewPointerMetrics.borderGapInset * 2)
+          let pointerLeft = pointerOffset(totalWidth: geo.size.width)
+          let borderGapWidth = ShelfPreviewLayoutMetrics.pointerWidth
+            - (ShelfPreviewLayoutMetrics.pointerBorderGapInset * 2)
 
           RoundedRectangle(cornerRadius: 18, style: .continuous)
             .strokeBorder(.white.opacity(0.26), lineWidth: 1)
             .overlay(alignment: .topLeading) {
               Rectangle()
-                .frame(width: borderGapWidth, height: ShelfPreviewPointerMetrics.borderGapHeight)
+                .frame(width: borderGapWidth, height: ShelfPreviewLayoutMetrics.pointerBorderGapHeight)
                 .offset(
-                  x: pointerOffset + ShelfPreviewPointerMetrics.borderGapInset,
+                  x: pointerLeft + ShelfPreviewLayoutMetrics.pointerBorderGapInset,
                   y: geo.size.height - 1
                 )
                 .blendMode(.destinationOut)
@@ -1380,17 +1471,11 @@ struct ShelfPreviewPopupView: View {
       }
 
       GeometryReader { geo in
-        let pointerOffset = max(
-          ShelfPreviewPointerMetrics.inset,
-          min(
-            appState.shelfPreview.pointerX - ShelfPreviewPointerMetrics.width / 2,
-            geo.size.width - ShelfPreviewPointerMetrics.width - ShelfPreviewPointerMetrics.inset
-          )
-        )
+        let pointerLeft = pointerOffset(totalWidth: geo.size.width)
 
         ShelfPreviewPointerShape()
           .fill(.ultraThickMaterial)
-          .frame(width: ShelfPreviewPointerMetrics.width, height: ShelfPreviewPointerMetrics.height)
+          .frame(width: ShelfPreviewLayoutMetrics.pointerWidth, height: ShelfPreviewLayoutMetrics.pointerHeight)
           .overlay {
             ShelfPreviewPointerOutlineShape()
               .stroke(
@@ -1398,12 +1483,17 @@ struct ShelfPreviewPopupView: View {
                 style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round)
               )
           }
-          .offset(x: pointerOffset, y: ShelfPreviewPointerMetrics.yOffset)
+          .offset(x: pointerLeft, y: ShelfPreviewLayoutMetrics.pointerVerticalOffset)
       }
-      .frame(height: 15)
+      .frame(height: ShelfPreviewLayoutMetrics.pointerContainerHeight)
     }
-    .padding(6)
+    .padding(ShelfPreviewLayoutMetrics.popupOuterPadding)
     .background(Color.clear)
+    .overlay {
+      GeometryReader { geo in
+        pointerTipProbe(in: geo.size)
+      }
+    }
   }
 }
 

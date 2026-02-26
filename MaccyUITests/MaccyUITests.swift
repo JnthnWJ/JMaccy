@@ -352,6 +352,67 @@ class MaccyUITests: XCTestCase {
     assertNotExists(app.descendants(matching: .any)["shelf-preview-popup"])
   }
 
+  func testShelfPreviewPointerTouchesSelectedCardTop() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    _ = seedShelfCopies(count: 8)
+    popUpWithMouse()
+
+    clickShelfCard(at: 1)
+    assertShelfCardSelected(1)
+
+    app.typeKey(.space, modifierFlags: [])
+    let preview = app.descendants(matching: .any)["shelf-preview-popup"]
+    assertExists(preview)
+
+    let pointerTip = app.descendants(matching: .any)["shelf-preview-pointer-tip"]
+    assertExists(pointerTip)
+
+    let selectedCard = shelfCards.element(boundBy: 1)
+    assertExists(selectedCard)
+
+    let pointerFrame = pointerTip.frame
+    let cardFrame = selectedCard.frame
+
+    XCTAssertLessThanOrEqual(
+      abs(pointerFrame.midX - cardFrame.midX),
+      14,
+      "Pointer tip should stay horizontally aligned with the selected card."
+    )
+    XCTAssertLessThanOrEqual(
+      abs(pointerFrame.midY - cardFrame.maxY),
+      8,
+      "Pointer tip should visually touch the selected card top edge."
+    )
+  }
+
+  func testShelfPreviewHidesWhenSelectedCardScrollsOffscreen() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    _ = seedShelfCopies(count: 18)
+    popUpWithMouse()
+
+    clickShelfCard(at: 1)
+    assertShelfCardSelected(1)
+
+    app.typeKey(.space, modifierFlags: [])
+    let preview = app.descendants(matching: .any)["shelf-preview-popup"]
+    assertExists(preview)
+
+    for _ in 0..<4 {
+      dragShelfCarousel(toLeft: true)
+    }
+
+    assertNotExists(preview)
+
+    for _ in 0..<4 {
+      dragShelfCarousel(toLeft: false)
+    }
+
+    usleep(350_000)
+    assertNotExists(preview)
+  }
+
   func testShelfTextEditorSaveUpdatesPreview() throws {
     try skipIfShelfUnavailable()
     setPopupLayoutMode("shelf")
