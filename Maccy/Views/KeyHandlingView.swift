@@ -31,12 +31,17 @@ struct KeyHandlingView<Content: View>: View {
   private func handleKeyDown(_ event: NSEvent) -> Bool {
     let keyChord = KeyChord(event)
     let shelfMode = appState.shelfModeEnabled
-    let searchInputActive = shelfMode && (NSApp.keyWindow?.firstResponder is NSTextView)
+    let firstResponder = NSApp.keyWindow?.firstResponder
+
+    // Let native text editing handle key events while any text input is active.
+    if firstResponder is NSTextView {
+      return false
+    }
 
     // Ignore input when candidate window is open
     // https://stackoverflow.com/questions/73677444/how-to-detect-the-candidate-window-when-using-japanese-keyboard
     if searchFocused,
-       let inputClient = NSApp.keyWindow?.firstResponder as? NSTextInputClient,
+       let inputClient = firstResponder as? NSTextInputClient,
        inputClient.hasMarkedText() {
       return false
     }
@@ -243,9 +248,6 @@ struct KeyHandlingView<Content: View>: View {
       return true
     case .togglePreview:
       if shelfMode {
-        guard !searchInputActive else {
-          return false
-        }
         appState.shelfPreview.toggle()
         appState.popup.needsResize = true
       } else {
