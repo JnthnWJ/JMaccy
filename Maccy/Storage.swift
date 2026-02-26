@@ -134,11 +134,20 @@ final class UnavailableCloudKitHistoryStore: CloudKitHistoryStore {
 }
 
 final class CloudKitHistoryStoreImpl: CloudKitHistoryStore {
+  private struct RetryPlan {
+    var records: [CKRecord]
+    var delayNanoseconds: UInt64
+  }
+
   private let itemType = "MaccyEncryptedItem"
   private let tagType = "MaccyEncryptedTag"
   private let vaultMetadataType = "MaccyVaultMetadata"
   private let vaultMetadataRecordName = "vault-metadata"
-  private let maxRecordsPerSaveBatch = 200
+  private let maxRecordsPerSaveBatch = 100
+  private let maxBytesPerSaveBatch = 4_000_000
+  private let maxSaveRetryAttempts = 3
+  private let requestTimeoutSeconds: TimeInterval = 30
+  private let resourceTimeoutSeconds: TimeInterval = 120
   private let zoneID = CKRecordZone.ID(zoneName: "MaccyHistoryZone", ownerName: CKCurrentUserDefaultName)
   private let database = CKContainer.default().privateCloudDatabase
 
@@ -162,12 +171,29 @@ final class CloudKitHistoryStoreImpl: CloudKitHistoryStore {
     guard !records.isEmpty else { return }
     try await ensureZone()
 
-    var start = 0
-    while start < records.count {
-      let end = min(start + maxRecordsPerSaveBatch, records.count)
-      let batch = Array(records[start..<end])
-      try await saveBatch(records: batch)
-      start = end
+    for batch in makeSaveBatches(from: records) {
+      try await saveBatchWithRetry(records: batch)
+    }
+  }
+
+  private func saveBatchWithRetry(records: [CKRecord]) async throws {
+    var attempt = 0
+    var recordsToSave = records
+
+    while true {
+      do {
+        try await saveBatch(records: recordsToSave)
+        return
+      } catch {
+        guard let retryPlan = retryPlan(for: error, attempt: attempt, records: recordsToSave) else {
+          throw error
+        }
+        attempt += 1
+        recordsToSave = retryPlan.records
+        if retryPlan.delayNanoseconds > 0 {
+          try? await Task.sleep(nanoseconds: retryPlan.delayNanoseconds)
+        }
+      }
     }
   }
 
@@ -175,6 +201,8 @@ final class CloudKitHistoryStoreImpl: CloudKitHistoryStore {
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
       let op = CKModifyRecordsOperation(recordsToSave: records, recordIDsToDelete: nil)
       op.savePolicy = .changedKeys
+      op.isAtomic = false
+      configureTimeouts(for: op)
       op.modifyRecordsCompletionBlock = { _, _, error in
         if let error {
           continuation.resume(throwing: error)
@@ -190,6 +218,7 @@ final class CloudKitHistoryStoreImpl: CloudKitHistoryStore {
     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
       let zone = CKRecordZone(zoneID: zoneID)
       let op = CKModifyRecordZonesOperation(recordZonesToSave: [zone], recordZoneIDsToDelete: nil)
+      configureTimeouts(for: op)
       op.modifyRecordZonesCompletionBlock = { _, _, error in
         if let error {
           if error.localizedDescription.localizedCaseInsensitiveContains("already exists") {
@@ -222,6 +251,7 @@ final class CloudKitHistoryStoreImpl: CloudKitHistoryStore {
         recordZoneIDs: [zoneID],
         configurationsByRecordZoneID: [zoneID: config]
       )
+      configureTimeouts(for: op)
       op.recordChangedBlock = { record in
         records.append(record)
       }
@@ -244,6 +274,131 @@ final class CloudKitHistoryStoreImpl: CloudKitHistoryStore {
       }
       self.database.add(op)
     }
+  }
+
+  private func makeSaveBatches(from records: [CKRecord]) -> [[CKRecord]] {
+    var batches: [[CKRecord]] = []
+    var currentBatch: [CKRecord] = []
+    var currentBatchBytes = 0
+
+    for record in records {
+      let recordBytes = estimatedRecordSize(for: record)
+      let recordWouldOverflowCount = currentBatch.count >= maxRecordsPerSaveBatch
+      let recordWouldOverflowSize = !currentBatch.isEmpty && currentBatchBytes + recordBytes > maxBytesPerSaveBatch
+
+      if recordWouldOverflowCount || recordWouldOverflowSize {
+        batches.append(currentBatch)
+        currentBatch = []
+        currentBatchBytes = 0
+      }
+
+      currentBatch.append(record)
+      currentBatchBytes += recordBytes
+    }
+
+    if !currentBatch.isEmpty {
+      batches.append(currentBatch)
+    }
+
+    return batches
+  }
+
+  private func estimatedRecordSize(for record: CKRecord) -> Int {
+    var size = 512
+    if let blob = record["blob"] as? Data {
+      size += blob.count
+    }
+    if let salt = record["salt"] as? Data {
+      size += salt.count
+    }
+    if let verifier = record["verifier"] as? Data {
+      size += verifier.count
+    }
+    return size
+  }
+
+  private func retryPlan(for error: Error, attempt: Int, records: [CKRecord]) -> RetryPlan? {
+    guard attempt < maxSaveRetryAttempts else { return nil }
+    guard let ckError = extractCloudError(error) else { return nil }
+
+    if ckError.code == .partialFailure,
+       let partialErrors = partialErrorsByRecordID(from: error), !partialErrors.isEmpty {
+      let retryableRecordIDs = Set(partialErrors.compactMap { recordID, partialError in
+        isRetryable(partialError) ? recordID : nil
+      })
+
+      guard !retryableRecordIDs.isEmpty else { return nil }
+
+      let retryRecords = records.filter { retryableRecordIDs.contains($0.recordID) }
+      guard !retryRecords.isEmpty else { return nil }
+
+      let delay = partialErrors.values.reduce(UInt64(0)) { max($0, retryDelayNanoseconds(for: $1, attempt: attempt)) }
+      return RetryPlan(records: retryRecords, delayNanoseconds: delay)
+    }
+
+    guard isRetryable(ckError) else { return nil }
+    return RetryPlan(records: records, delayNanoseconds: retryDelayNanoseconds(for: ckError, attempt: attempt))
+  }
+
+  private func extractCloudError(_ error: Error) -> CKError? {
+    if let ckError = error as? CKError {
+      if ckError.code == .partialFailure,
+         let partialErrors = partialErrorsByRecordID(from: error) {
+        for nestedError in partialErrors.values {
+          if let nestedCloudError = extractCloudError(nestedError) {
+            return nestedCloudError
+          }
+        }
+      }
+      return ckError
+    }
+
+    let nsError = error as NSError
+    if let underlyingError = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
+      return extractCloudError(underlyingError)
+    }
+    return nil
+  }
+
+  private func partialErrorsByRecordID(from error: Error) -> [CKRecord.ID: CKError]? {
+    let nsError = error as NSError
+    guard let partialErrors = nsError.userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Any] else {
+      return nil
+    }
+
+    var output: [CKRecord.ID: CKError] = [:]
+    for (key, value) in partialErrors {
+      guard let recordID = key as? CKRecord.ID,
+            let nestedError = value as? Error,
+            let cloudError = extractCloudError(nestedError) else {
+        continue
+      }
+      output[recordID] = cloudError
+    }
+    return output
+  }
+
+  private func isRetryable(_ error: CKError) -> Bool {
+    switch error.code {
+    case .networkFailure, .networkUnavailable, .serviceUnavailable, .requestRateLimited, .zoneBusy, .internalError:
+      return true
+    default:
+      return false
+    }
+  }
+
+  private func retryDelayNanoseconds(for error: CKError, attempt: Int) -> UInt64 {
+    if let retryAfter = (error.userInfo[CKErrorRetryAfterKey] as? NSNumber)?.doubleValue {
+      return max(0, UInt64(retryAfter * 1_000_000_000))
+    }
+
+    let backoffSeconds = min(8.0, pow(2.0, Double(attempt)))
+    return UInt64(backoffSeconds * 1_000_000_000)
+  }
+
+  private func configureTimeouts(for operation: CKOperation) {
+    operation.configuration.timeoutIntervalForRequest = requestTimeoutSeconds
+    operation.configuration.timeoutIntervalForResource = resourceTimeoutSeconds
   }
 }
 
@@ -1199,6 +1354,15 @@ class SyncEncryptionManager {
 
   private func extractCloudError(_ error: Error) -> CKError? {
     if let ckError = error as? CKError {
+      if ckError.code == .partialFailure,
+         let partialErrors = (ckError as NSError).userInfo[CKPartialErrorsByItemIDKey] as? [AnyHashable: Any] {
+        for value in partialErrors.values {
+          if let nestedError = value as? Error,
+             let nestedCloudError = extractCloudError(nestedError) {
+            return nestedCloudError
+          }
+        }
+      }
       return ckError
     }
 
