@@ -334,6 +334,32 @@ class HistoryTests: XCTestCase {
     XCTAssertEqual(history.tags.first?.id, work.id)
   }
 
+  func testShelfDeleteSelectionPrefersItemOnRight() {
+    Defaults[.popupLayoutMode] = .shelf
+
+    let oldest = history.add(historyItem("oldest"))
+    let middle = history.add(historyItem("middle"))
+    _ = history.add(historyItem("newest"))
+
+    AppState.shared.navigator.select(item: middle)
+    AppState.shared.deleteSelection()
+
+    XCTAssertEqual(AppState.shared.navigator.leadHistoryItem?.id, oldest.id)
+  }
+
+  func testShelfDeleteSelectionFallsBackToLeftWhenDeletingLastVisibleItem() {
+    Defaults[.popupLayoutMode] = .shelf
+
+    let oldest = history.add(historyItem("oldest"))
+    let middle = history.add(historyItem("middle"))
+    _ = history.add(historyItem("newest"))
+
+    AppState.shared.navigator.select(item: oldest)
+    AppState.shared.deleteSelection()
+
+    XCTAssertEqual(AppState.shared.navigator.leadHistoryItem?.id, middle.id)
+  }
+
   private func historyItem(_ value: String) -> HistoryItem {
     let contents = [
       HistoryItemContent(
