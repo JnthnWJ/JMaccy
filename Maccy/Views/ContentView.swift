@@ -216,6 +216,7 @@ private struct ShelfTopStripView: View {
   let onOutsideSearchInteraction: () -> Void
 
   @Environment(AppState.self) private var appState
+  @Environment(\.colorScheme) private var colorScheme
   @Default(.showSearch) private var showSearch
   @State private var showActions = false
   @State private var showCreateTagPopover = false
@@ -263,6 +264,18 @@ private struct ShelfTopStripView: View {
     CGFloat(chips.count) * 20
   }
 
+  private var selectedTagForegroundColor: Color {
+    colorScheme == .light ? .white : .primary
+  }
+
+  private var selectedTagBackgroundColor: Color {
+    colorScheme == .light ? Color.black.opacity(0.38) : Color.white.opacity(0.16)
+  }
+
+  private var selectedTagRingColor: Color {
+    colorScheme == .light ? Color.black.opacity(0.72) : Color.white.opacity(0.95)
+  }
+
   private func preferredExpandedSearchWidth(availableWidth: CGFloat) -> CGFloat {
     let preferred = max(320, min(620, availableWidth - 260))
     let maxAllowed = max(210, availableWidth - trailingActionsInset - dotRailWidth - 44)
@@ -286,9 +299,9 @@ private struct ShelfTopStripView: View {
       }
       .padding(.horizontal, 12)
       .padding(.vertical, 6)
-      .foregroundStyle(isSelected ? .primary : .secondary)
+      .foregroundStyle(isSelected ? selectedTagForegroundColor : .secondary)
       .background(
-        isSelected ? Color.white.opacity(0.16) : Color.clear,
+        isSelected ? selectedTagBackgroundColor : Color.clear,
         in: Capsule()
       )
       .contentShape(Capsule())
@@ -299,7 +312,7 @@ private struct ShelfTopStripView: View {
         .overlay {
           Circle()
             .strokeBorder(
-              isSelected ? Color.white.opacity(0.95) : Color.white.opacity(0),
+              isSelected ? selectedTagRingColor : Color.white.opacity(0),
               lineWidth: 2
             )
             .padding(-3)
@@ -796,7 +809,9 @@ private struct ShelfCardView: View {
 
           Spacer(minLength: 0)
 
-          AppImageView(appImage: item.applicationImage, size: NSSize(width: 22, height: 22))
+          if !item.isTagged {
+            AppImageView(appImage: item.applicationImage, size: NSSize(width: 22, height: 22))
+          }
 
           if item.isPinned {
             Image(systemName: "pin.fill")
@@ -863,7 +878,7 @@ private struct ShelfCardView: View {
     .accessibilityLabel(Text(verbatim: item.title.isEmpty ? item.text.shortened(to: 80) : item.title.shortened(to: 80)))
     .accessibilityValue(Text(verbatim: isSelected ? "selected" : "unselected"))
     .contextMenu {
-      if item.item.tag != nil {
+      if item.isTagged {
         Button("shelf_tag_remove_item") {
           appState.history.removeTag(from: item)
         }

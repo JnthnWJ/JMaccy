@@ -78,6 +78,7 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
 
   var isPinned: Bool { item.pin != nil }
   var isUnpinned: Bool { item.pin == nil }
+  var isTagged: Bool { item.tag != nil }
 
   var shelfCardType: ShelfCardType {
     if hasImage {
