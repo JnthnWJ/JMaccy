@@ -1,5 +1,6 @@
 import XCTest
 import Defaults
+import SwiftUI
 @testable import Maccy
 
 @MainActor
@@ -134,6 +135,21 @@ class HistoryItemDecoratorTests: XCTestCase {
     XCTAssertEqual(itemDecorator.attributedTitle, nil)
   }
 
+  func testShelfHeaderColorUsesTagColorWhenTagged() {
+    let itemDecorator = historyItemDecorator("foo")
+    let originalColor = itemDecorator.shelfHeaderColor
+
+    let tag = HistoryTag(name: "Work", colorKey: ShelfTagColor.crimson.rawValue)
+    Storage.shared.context.insert(tag)
+    itemDecorator.item.tag = tag
+
+    assertColorsEqual(itemDecorator.shelfHeaderColor, ShelfTagColor.crimson.color)
+    XCTAssertNotEqual(colorComponents(itemDecorator.shelfHeaderColor), colorComponents(originalColor))
+
+    itemDecorator.item.tag = nil
+    assertColorsEqual(itemDecorator.shelfHeaderColor, originalColor)
+  }
+
   private func historyItemDecorator(
     _ value: String?,
     application: String? = "com.apple.finder"
@@ -226,5 +242,23 @@ class HistoryItemDecoratorTests: XCTestCase {
     let upperBound = item.title.index(startIndex, offsetBy: to + 1)
 
     return lowerBound..<upperBound
+  }
+
+  private func colorComponents(_ color: Color) -> [CGFloat] {
+    guard let rgb = NSColor(color).usingColorSpace(.deviceRGB) else {
+      return []
+    }
+
+    return [rgb.redComponent, rgb.greenComponent, rgb.blueComponent, rgb.alphaComponent]
+  }
+
+  private func assertColorsEqual(_ lhs: Color, _ rhs: Color, file: StaticString = #filePath, line: UInt = #line) {
+    let lhsComponents = colorComponents(lhs)
+    let rhsComponents = colorComponents(rhs)
+    XCTAssertEqual(lhsComponents.count, rhsComponents.count, file: file, line: line)
+
+    for (left, right) in zip(lhsComponents, rhsComponents) {
+      XCTAssertEqual(left, right, accuracy: 0.001, file: file, line: line)
+    }
   }
 }

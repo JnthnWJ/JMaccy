@@ -15,6 +15,18 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
   var items: [HistoryItemDecorator] = []
   var pasteStack: PasteStack?
+  var tags: [HistoryTag] = []
+  var selectedTagID: UUID? {
+    didSet {
+      guard oldValue != selectedTagID else { return }
+
+      applyCurrentFilters()
+      if AppState.shared.shelfModeEnabled {
+        AppState.shared.navigator.highlightShelfFirst()
+      }
+      AppState.shared.popup.needsResize = true
+    }
+  }
 
   var pinnedItems: [HistoryItemDecorator] { items.filter(\.isPinned) }
   var unpinnedItems: [HistoryItemDecorator] { items.filter(\.isUnpinned) }
@@ -24,7 +36,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       guard oldValue != searchQuery else { return }
 
       throttler.throttle { [self] in
-        updateItems(search.search(string: searchQuery, within: all))
+        applyCurrentFilters()
 
         if searchQuery.isEmpty {
           if AppState.shared.shelfModeEnabled {
@@ -112,9 +124,10 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     let descriptor = FetchDescriptor<HistoryItem>()
     let results = try Storage.shared.context.fetch(descriptor)
     all = sorter.sort(results).map { HistoryItemDecorator($0) }
-    items = all
+    loadTags()
 
     limitHistorySize(to: Defaults[.size])
+    applyCurrentFilters()
 
     updateShortcuts()
     // Ensure that panel size is proper *after* loading all items.
@@ -158,6 +171,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       item.numberOfCopies += existingHistoryItem.numberOfCopies
       item.pin = existingHistoryItem.pin
       item.title = existingHistoryItem.title
+      item.tag = existingHistoryItem.tag
       if !item.fromMaccy {
         item.application = existingHistoryItem.application
       }
@@ -194,10 +208,12 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
         all.insert(itemDecorator, at: index)
       }
 
-      items = all
-      updateUnpinnedShortcuts()
       AppState.shared.popup.needsResize = true
     }
+
+    applyCurrentFilters()
+    updateUnpinnedShortcuts()
+    AppState.shared.popup.needsResize = true
 
     return itemDecorator
   }
@@ -225,7 +241,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       }
       all.removeAll(where: \.isUnpinned)
       sessionLog.removeValues { $0.pin == nil }
-      items = all
+      applyCurrentFilters()
 
       try? Storage.shared.context.transaction {
         try? Storage.shared.context.delete(
@@ -256,7 +272,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       }
       all.removeAll()
       sessionLog.removeAll()
-      items = all
+      applyCurrentFilters()
 
       try? Storage.shared.context.delete(model: HistoryItem.self)
       Storage.shared.context.processPendingChanges()
@@ -282,9 +298,9 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     }
 
     all.removeAll { $0 == item }
-    items.removeAll { $0 == item }
     sessionLog.removeValues { $0 == item.item }
 
+    applyCurrentFilters()
     updateUnpinnedShortcuts()
     Task {
       AppState.shared.popup.needsResize = true
@@ -440,7 +456,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       all.insert(item, at: newIndex)
     }
 
-    items = all
+    applyCurrentFilters()
 
     searchQuery = ""
     updateUnpinnedShortcuts()
@@ -472,10 +488,130 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     return nil
   }
 
-  private func updateItems(_ newItems: [Search.SearchResult]) {
+  @MainActor
+  func selectTag(_ id: UUID?) {
+    selectedTagID = id
+  }
+
+  @MainActor
+  @discardableResult
+  func createTag(name: String, color: ShelfTagColor) -> HistoryTag? {
+    let normalizedName = normalizeTagName(name)
+    guard !normalizedName.isEmpty else { return nil }
+    guard isTagNameAvailable(normalizedName) else { return nil }
+
+    let tag = HistoryTag(name: normalizedName, colorKey: color.rawValue)
+    Storage.shared.context.insert(tag)
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+    loadTags()
+    AppState.shared.popup.needsResize = true
+
+    return tag
+  }
+
+  @MainActor
+  @discardableResult
+  func renameTag(id: UUID, to newName: String) -> Bool {
+    guard let tag = tags.first(where: { $0.id == id }) else { return false }
+
+    let normalizedName = normalizeTagName(newName)
+    guard !normalizedName.isEmpty else { return false }
+    guard isTagNameAvailable(normalizedName, excludingID: id) else { return false }
+
+    tag.name = normalizedName
+    tag.updatedAt = Date.now
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+    loadTags()
+    AppState.shared.popup.needsResize = true
+
+    return true
+  }
+
+  @MainActor
+  func deleteTag(id: UUID) {
+    guard let tag = tags.first(where: { $0.id == id }) else { return }
+
+    if selectedTagID == id {
+      selectedTagID = nil
+    }
+
+    Storage.shared.context.delete(tag)
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+    loadTags()
+    applyCurrentFilters()
+    AppState.shared.popup.needsResize = true
+  }
+
+  @MainActor
+  @discardableResult
+  func assignTag(tagID: UUID, toItemID itemID: UUID) -> Bool {
+    guard let item = all.first(where: { $0.id == itemID }) else { return false }
+    guard let tag = tags.first(where: { $0.id == tagID }) else { return false }
+
+    item.item.tag = tag
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+    applyCurrentFilters()
+
+    return true
+  }
+
+  @MainActor
+  func removeTag(from item: HistoryItemDecorator) {
+    item.item.tag = nil
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+    applyCurrentFilters()
+  }
+
+  @MainActor
+  func isTagNameAvailable(_ name: String, excludingID: UUID? = nil) -> Bool {
+    let normalizedName = normalizeTagName(name)
+    guard !normalizedName.isEmpty else { return false }
+
+    return !tags.contains { tag in
+      guard tag.id != excludingID else { return false }
+      return tag.name.compare(normalizedName, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+    }
+  }
+
+  @MainActor
+  func normalizeTagName(_ value: String) -> String {
+    return value.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  @MainActor
+  private func loadTags() {
+    let descriptor = FetchDescriptor<HistoryTag>(
+      sortBy: [SortDescriptor(\.createdAt), SortDescriptor(\.name)]
+    )
+    tags = (try? Storage.shared.context.fetch(descriptor)) ?? []
+
+    if let selectedTagID, !tags.contains(where: { $0.id == selectedTagID }) {
+      self.selectedTagID = nil
+    }
+  }
+
+  private func filteredItemsByTag() -> [HistoryItemDecorator] {
+    guard AppState.shared.shelfModeEnabled, let selectedTagID else {
+      return all
+    }
+
+    return all.filter { $0.item.tag?.id == selectedTagID }
+  }
+
+  private func applyCurrentFilters() {
+    let searched = search.search(string: searchQuery, within: filteredItemsByTag())
+    updateItems(searched, query: searchQuery)
+  }
+
+  private func updateItems(_ newItems: [Search.SearchResult], query: String) {
     items = newItems.map { result in
       let item = result.object
-      item.highlight(searchQuery, result.ranges)
+      item.highlight(query, result.ranges)
 
       return item
     }

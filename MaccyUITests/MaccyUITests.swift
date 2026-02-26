@@ -116,7 +116,7 @@ class MaccyUITests: XCTestCase {
 
     let strip = app.descendants(matching: .any)["shelf-top-strip"]
     let searchToggle = app.descendants(matching: .any)["shelf-search-toggle"]
-    let firstFullTag = app.descendants(matching: .any)["shelf-tag-full-shelf_chip_clipboard"]
+    let firstFullTag = app.descendants(matching: .any)["shelf-tag-full-all"]
     let addTag = app.descendants(matching: .any)["shelf-add-tag"]
     let actions = app.descendants(matching: .any)["shelf-actions"]
 
@@ -139,8 +139,8 @@ class MaccyUITests: XCTestCase {
     app.descendants(matching: .any)["shelf-search-toggle"].click()
 
     let searchField = app.descendants(matching: .any)["shelf-search-field"]
-    let fullTag = app.descendants(matching: .any)["shelf-tag-full-shelf_chip_clipboard"]
-    let dotTag = app.descendants(matching: .any)["shelf-tag-dot-shelf_chip_clipboard"]
+    let fullTag = app.descendants(matching: .any)["shelf-tag-full-all"]
+    let dotTag = app.descendants(matching: .any)["shelf-tag-dot-all"]
     let addTag = app.descendants(matching: .any)["shelf-add-tag"]
     let actions = app.descendants(matching: .any)["shelf-actions"]
 
@@ -207,7 +207,7 @@ class MaccyUITests: XCTestCase {
     app.descendants(matching: .any)["shelf-search-toggle"].click()
 
     let searchField = app.descendants(matching: .any)["shelf-search-field"]
-    let dotTag = app.descendants(matching: .any)["shelf-tag-dot-shelf_chip_clipboard"]
+    let dotTag = app.descendants(matching: .any)["shelf-tag-dot-all"]
     assertExists(searchField)
     assertExists(dotTag)
 
@@ -216,7 +216,77 @@ class MaccyUITests: XCTestCase {
     assertExists(app.descendants(matching: .any)["shelf-top-strip"])
     assertNotExists(searchField)
     assertExists(app.descendants(matching: .any)["shelf-search-toggle"])
-    assertExists(app.descendants(matching: .any)["shelf-tag-full-shelf_chip_clipboard"])
+    assertExists(app.descendants(matching: .any)["shelf-tag-full-all"])
+  }
+
+  func testShelfCreateTagAndFilterViaDragDrop() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    _ = seedShelfCopies(count: 4)
+    popUpWithMouse()
+
+    createShelfTag(name: "Work")
+    let tagID = normalizedTagIdentifier("Work")
+    let workTag = app.descendants(matching: .any)["shelf-tag-full-\(tagID)"]
+    assertExists(workTag)
+
+    dragShelfCard(at: 0, ontoTagIdentifier: tagID)
+    workTag.click()
+
+    waitForShelfCardCount(1)
+  }
+
+  func testShelfRenameAndDeleteTag() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    popUpWithMouse()
+
+    createShelfTag(name: "Work")
+    let workTagID = normalizedTagIdentifier("Work")
+    let workTag = app.descendants(matching: .any)["shelf-tag-full-\(workTagID)"]
+    assertExists(workTag)
+
+    workTag.rightClick()
+    app.menuItems["Rename"].click()
+
+    let renameInput = app.textFields["shelf-tag-rename-input"]
+    assertExists(renameInput)
+    renameInput.click()
+    app.typeKey("a", modifierFlags: .command)
+    app.typeKey(.delete, modifierFlags: [])
+    renameInput.typeText("Later")
+    app.buttons["shelf-tag-rename-confirm"].click()
+
+    let laterTagID = normalizedTagIdentifier("Later")
+    let laterTag = app.descendants(matching: .any)["shelf-tag-full-\(laterTagID)"]
+    assertExists(laterTag)
+
+    laterTag.rightClick()
+    app.menuItems["Delete"].click()
+    app.buttons["Delete"].click()
+    assertNotExists(laterTag)
+  }
+
+  func testShelfCardContextMenuRemovesTag() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    _ = seedShelfCopies(count: 3)
+    popUpWithMouse()
+
+    createShelfTag(name: "Clip")
+    let clipTagID = normalizedTagIdentifier("Clip")
+    let clipTag = app.descendants(matching: .any)["shelf-tag-full-\(clipTagID)"]
+    assertExists(clipTag)
+
+    dragShelfCard(at: 0, ontoTagIdentifier: clipTagID)
+    clipTag.click()
+    waitForShelfCardCount(1)
+
+    let taggedCard = shelfCards.element(boundBy: 0)
+    taggedCard.rightClick()
+    app.menuItems["Remove Tag"].click()
+
+    waitForShelfCardCount(0)
   }
 
   func testShelfCardClickSelectsExactCardAcrossDirections() throws {
@@ -768,6 +838,49 @@ class MaccyUITests: XCTestCase {
     let end = carousel.coordinate(withNormalizedOffset: CGVector(dx: endX, dy: 0.5))
     start.press(forDuration: 0.05, thenDragTo: end)
     usleep(250000)
+  }
+
+  private func dragShelfCard(at index: Int, ontoTagIdentifier tagIdentifier: String) {
+    let card = shelfCards.element(boundBy: index)
+    assertExists(card)
+    let tag = app.descendants(matching: .any)["shelf-tag-full-\(tagIdentifier)"]
+    assertExists(tag)
+
+    let start = card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+    let end = tag.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+    start.press(forDuration: 0.1, thenDragTo: end)
+    usleep(300000)
+  }
+
+  private func createShelfTag(name: String) {
+    let addTag = app.descendants(matching: .any)["shelf-add-tag"]
+    assertExists(addTag)
+    addTag.click()
+
+    let nameInput = app.textFields["shelf-tag-name-input"]
+    assertExists(nameInput)
+    nameInput.click()
+    nameInput.typeText(name)
+
+    let confirm = app.buttons["shelf-tag-create-confirm"]
+    assertExists(confirm)
+    confirm.click()
+  }
+
+  private func normalizedTagIdentifier(_ value: String) -> String {
+    let lowered = value.lowercased()
+    let mapped = lowered.map { $0.isLetter || $0.isNumber ? String($0) : "-" }.joined()
+    let collapsed = mapped.replacingOccurrences(
+      of: "-+",
+      with: "-",
+      options: .regularExpression
+    ).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    return collapsed.isEmpty ? "tag" : collapsed
+  }
+
+  private func waitForShelfCardCount(_ expectedCount: Int) {
+    expectation(for: NSPredicate(format: "count == \(expectedCount)"), evaluatedWith: shelfCards)
+    waitForExpectations(timeout: 3)
   }
 
   private func seedShelfCopies(count: Int) -> [String] {

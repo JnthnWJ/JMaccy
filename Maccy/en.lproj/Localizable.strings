@@ -40,3 +40,15 @@
 "shelf_type_image" = "Image";
 "shelf_type_file" = "File";
 "shelf_type_rich_text" = "Rich Text";
+"shelf_tag_all" = "All";
+"shelf_tag_create_title" = "Create Tag";
+"shelf_tag_create_action" = "Create";
+"shelf_tag_rename_title" = "Rename Tag";
+"shelf_tag_rename_action" = "Save";
+"shelf_tag_name_placeholder" = "Tag name";
+"shelf_tag_name_exists" = "Tag name must be unique.";
+"shelf_tag_delete_title" = "Delete Tag?";
+"shelf_tag_delete_message" = "Delete \"%@\" and remove it from all items?";
+"shelf_tag_delete" = "Delete";
+"shelf_tag_rename" = "Rename";
+"shelf_tag_remove_item" = "Remove Tag";

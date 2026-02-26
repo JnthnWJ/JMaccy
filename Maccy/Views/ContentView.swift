@@ -144,6 +144,7 @@ private struct ShelfContentView: View {
     .animation(.easeInOut(duration: 0.16), value: appState.shelfPreview.isOpen)
     .onAppear {
       appState.shelfPreview.close()
+      appState.history.selectTag(nil)
       searchFocused = false
       searchExpanded = false
       appState.navigator.highlightShelfFirst()
@@ -203,10 +204,10 @@ private struct ShelfTopStripView: View {
   }
 
   private struct TagChip: Identifiable {
-    let key: String
+    let id: String
+    let title: String
     let color: Color
-
-    var id: String { key }
+    let tagID: UUID?
   }
 
   @Binding var searchQuery: String
@@ -217,15 +218,34 @@ private struct ShelfTopStripView: View {
   @Environment(AppState.self) private var appState
   @Default(.showSearch) private var showSearch
   @State private var showActions = false
-  @State private var selectedTag = "shelf_chip_code"
+  @State private var showCreateTagPopover = false
+  @State private var showRenameTagPopover = false
+  @State private var showDeleteTagConfirmation = false
+  @State private var newTagName = ""
+  @State private var newTagColor: ShelfTagColor = .blue
+  @State private var renameTagID: UUID?
+  @State private var renameTagName = ""
+  @State private var deleteTagID: UUID?
+  @State private var deleteTagName = ""
 
-  private let chips = [
-    TagChip(key: "shelf_chip_clipboard", color: .white.opacity(0.95)),
-    TagChip(key: "shelf_chip_links", color: .orange),
-    TagChip(key: "shelf_chip_notes", color: .yellow),
-    TagChip(key: "shelf_chip_emails", color: .green),
-    TagChip(key: "shelf_chip_code", color: .purple)
-  ]
+  private var chips: [TagChip] {
+    let allChip = TagChip(
+      id: "all",
+      title: NSLocalizedString("shelf_tag_all", comment: ""),
+      color: .white.opacity(0.95),
+      tagID: nil
+    )
+    let tagChips = appState.history.tags.map { tag in
+      TagChip(
+        id: normalizedTagIdentifier(tag.name),
+        title: tag.name,
+        color: tag.color.color,
+        tagID: tag.id
+      )
+    }
+
+    return [allChip] + tagChips
+  }
 
   private var isSearchExpanded: Bool {
     showSearch && (searchExpanded || !searchQuery.isEmpty)
@@ -251,7 +271,7 @@ private struct ShelfTopStripView: View {
 
   @ViewBuilder
   private func tagView(for chip: TagChip, presentation: TagPresentation) -> some View {
-    let isSelected = selectedTag == chip.key
+    let isSelected = appState.history.selectedTagID == chip.tagID
 
     switch presentation {
     case .full:
@@ -260,7 +280,7 @@ private struct ShelfTopStripView: View {
           .fill(chip.color)
           .frame(width: 7, height: 7)
 
-        Text(LocalizedStringKey(chip.key))
+        Text(verbatim: chip.title)
           .font(.callout)
           .lineLimit(1)
       }
@@ -286,6 +306,120 @@ private struct ShelfTopStripView: View {
         }
         .contentShape(Circle())
     }
+  }
+
+  private func normalizedTagIdentifier(_ value: String) -> String {
+    let lowered = value.lowercased()
+    let raw = lowered.unicodeScalars.map { scalar -> Character in
+      if CharacterSet.alphanumerics.contains(scalar) {
+        return Character(scalar)
+      }
+      return "-"
+    }
+    let collapsed = String(raw)
+      .replacingOccurrences(of: "-+", with: "-", options: .regularExpression)
+      .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+
+    return collapsed.isEmpty ? "tag" : collapsed
+  }
+
+  private func tagAccessibilityIdentifier(for chip: TagChip, presentation: TagPresentation) -> String {
+    switch presentation {
+    case .dotOnly:
+      return "shelf-tag-dot-\(chip.id)"
+    case .full:
+      return "shelf-tag-full-\(chip.id)"
+    }
+  }
+
+  @ViewBuilder
+  private func tagButton(for chip: TagChip, presentation: TagPresentation) -> some View {
+    if let tagID = chip.tagID {
+      Button {
+        onOutsideSearchInteraction()
+        appState.history.selectTag(tagID)
+      } label: {
+        tagView(for: chip, presentation: presentation)
+      }
+      .buttonStyle(.plain)
+      .contextMenu {
+        Button("shelf_tag_rename") {
+          renameTagID = tagID
+          renameTagName = chip.title
+          showRenameTagPopover = true
+        }
+        Button("shelf_tag_delete", role: .destructive) {
+          deleteTagID = tagID
+          deleteTagName = chip.title
+          showDeleteTagConfirmation = true
+        }
+      }
+      .dropDestination(for: String.self) { items, _ in
+        guard let rawItemID = items.first,
+              let itemID = UUID(uuidString: rawItemID) else {
+          return false
+        }
+
+        onOutsideSearchInteraction()
+        return appState.history.assignTag(tagID: tagID, toItemID: itemID)
+      }
+      .accessibilityIdentifier(tagAccessibilityIdentifier(for: chip, presentation: presentation))
+    } else {
+      Button {
+        onOutsideSearchInteraction()
+        appState.history.selectTag(nil)
+      } label: {
+        tagView(for: chip, presentation: presentation)
+      }
+      .buttonStyle(.plain)
+      .accessibilityIdentifier(tagAccessibilityIdentifier(for: chip, presentation: presentation))
+    }
+  }
+
+  private var canCreateTag: Bool {
+    return appState.history.isTagNameAvailable(newTagName)
+  }
+
+  private var canRenameTag: Bool {
+    guard let renameTagID else { return false }
+    return appState.history.isTagNameAvailable(renameTagName, excludingID: renameTagID)
+  }
+
+  private var showCreateTagNameError: Bool {
+    return !newTagName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !canCreateTag
+  }
+
+  private var showRenameTagNameError: Bool {
+    return !renameTagName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !canRenameTag
+  }
+
+  private func resetCreateTagForm() {
+    newTagName = ""
+    newTagColor = .blue
+  }
+
+  private func submitCreateTag() {
+    guard let tag = appState.history.createTag(name: newTagName, color: newTagColor) else {
+      return
+    }
+
+    appState.history.selectTag(tag.id)
+    showCreateTagPopover = false
+    resetCreateTagForm()
+  }
+
+  private func submitRenameTag() {
+    guard let renameTagID else {
+      return
+    }
+
+    guard appState.history.renameTag(id: renameTagID, to: renameTagName) else {
+      return
+    }
+
+    self.renameTagID = nil
+    renameTagName = ""
+    showRenameTagPopover = false
   }
 
   var body: some View {
@@ -327,25 +461,15 @@ private struct ShelfTopStripView: View {
 
           HStack(spacing: tagPresentation == .dotOnly ? 14 : 4) {
             ForEach(chips) { chip in
-              Button {
-                onOutsideSearchInteraction()
-                selectedTag = chip.key
-              } label: {
-                tagView(for: chip, presentation: tagPresentation)
-              }
-              .buttonStyle(.plain)
-              .accessibilityIdentifier(
-                tagPresentation == .dotOnly
-                  ? "shelf-tag-dot-\(chip.key)"
-                  : "shelf-tag-full-\(chip.key)"
-              )
+              tagButton(for: chip, presentation: tagPresentation)
             }
           }
 
           if !isSearchExpanded {
             Button {
               onOutsideSearchInteraction()
-              // Placeholder UI to match the shelf controls in Paste.
+              resetCreateTagForm()
+              showCreateTagPopover = true
             } label: {
               Image(systemName: "plus")
                 .font(.title3)
@@ -354,6 +478,41 @@ private struct ShelfTopStripView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("shelf-add-tag")
+            .popover(isPresented: $showCreateTagPopover, arrowEdge: .top) {
+              VStack(alignment: .leading, spacing: 12) {
+                Text("shelf_tag_create_title")
+                  .font(.headline)
+
+                TextField("shelf_tag_name_placeholder", text: $newTagName)
+                  .textFieldStyle(.roundedBorder)
+                  .accessibilityIdentifier("shelf-tag-name-input")
+
+                ShelfTagColorPicker(selectedColor: $newTagColor)
+                  .accessibilityIdentifier("shelf-tag-color-picker")
+
+                if showCreateTagNameError {
+                  Text("shelf_tag_name_exists")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                }
+
+                HStack {
+                  Spacer()
+                  Button("clear_alert_cancel") {
+                    showCreateTagPopover = false
+                    resetCreateTagForm()
+                  }
+                  Button("shelf_tag_create_action") {
+                    submitCreateTag()
+                  }
+                  .disabled(!canCreateTag)
+                  .keyboardShortcut(.defaultAction)
+                  .accessibilityIdentifier("shelf-tag-create-confirm")
+                }
+              }
+              .padding(14)
+              .frame(width: 300)
+            }
           }
         }
         .padding(.trailing, trailingActionsInset)
@@ -385,11 +544,89 @@ private struct ShelfTopStripView: View {
     }
     .frame(height: 40)
     .accessibilityIdentifier("shelf-top-strip")
+    .popover(isPresented: $showRenameTagPopover, arrowEdge: .top) {
+      VStack(alignment: .leading, spacing: 12) {
+        Text("shelf_tag_rename_title")
+          .font(.headline)
+
+        TextField("shelf_tag_name_placeholder", text: $renameTagName)
+          .textFieldStyle(.roundedBorder)
+          .accessibilityIdentifier("shelf-tag-rename-input")
+
+        if showRenameTagNameError {
+          Text("shelf_tag_name_exists")
+            .font(.caption)
+            .foregroundStyle(.red)
+        }
+
+        HStack {
+          Spacer()
+          Button("clear_alert_cancel") {
+            showRenameTagPopover = false
+            renameTagID = nil
+            renameTagName = ""
+          }
+          Button("shelf_tag_rename_action") {
+            submitRenameTag()
+          }
+          .disabled(!canRenameTag)
+          .keyboardShortcut(.defaultAction)
+          .accessibilityIdentifier("shelf-tag-rename-confirm")
+        }
+      }
+      .padding(14)
+      .frame(width: 300)
+    }
+    .alert(
+      Text("shelf_tag_delete_title"),
+      isPresented: $showDeleteTagConfirmation
+    ) {
+      Button("clear_alert_cancel", role: .cancel) {
+        deleteTagID = nil
+        deleteTagName = ""
+      }
+      Button("shelf_tag_delete", role: .destructive) {
+        if let deleteTagID {
+          appState.history.deleteTag(id: deleteTagID)
+        }
+        self.deleteTagID = nil
+        deleteTagName = ""
+      }
+    } message: {
+      Text(String(format: NSLocalizedString("shelf_tag_delete_message", comment: ""), deleteTagName))
+    }
     .onChange(of: searchFocused) {
       if searchFocused {
         searchExpanded = true
       } else if searchQuery.isEmpty {
         searchExpanded = false
+      }
+    }
+  }
+}
+
+private struct ShelfTagColorPicker: View {
+  @Binding var selectedColor: ShelfTagColor
+
+  var body: some View {
+    HStack(spacing: 10) {
+      ForEach(ShelfTagColor.allCases) { color in
+        Button {
+          selectedColor = color
+        } label: {
+          Circle()
+            .fill(color.color)
+            .frame(width: 16, height: 16)
+            .overlay {
+              Circle()
+                .strokeBorder(
+                  selectedColor == color ? Color.white : Color.white.opacity(0.2),
+                  lineWidth: selectedColor == color ? 2.5 : 1
+                )
+                .padding(-3)
+            }
+        }
+        .buttonStyle(.plain)
       }
     }
   }
@@ -540,6 +777,7 @@ private struct ShelfCardView: View {
   @Bindable var item: HistoryItemDecorator
   let isSelected: Bool
   let onCardTap: (UUID) -> Void
+  @Environment(AppState.self) private var appState
 
   var body: some View {
     Button {
@@ -619,10 +857,18 @@ private struct ShelfCardView: View {
       .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
     .buttonStyle(.plain)
+    .draggable(item.id.uuidString)
     .accessibilityIdentifier("shelf-card")
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(Text(verbatim: item.title.isEmpty ? item.text.shortened(to: 80) : item.title.shortened(to: 80)))
     .accessibilityValue(Text(verbatim: isSelected ? "selected" : "unselected"))
+    .contextMenu {
+      if item.item.tag != nil {
+        Button("shelf_tag_remove_item") {
+          appState.history.removeTag(from: item)
+        }
+      }
+    }
     .onAppear {
       item.ensureThumbnailImage()
     }

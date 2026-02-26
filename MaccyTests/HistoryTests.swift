@@ -6,19 +6,30 @@ import Defaults
 class HistoryTests: XCTestCase {
   let savedSize = Defaults[.size]
   let savedSortBy = Defaults[.sortBy]
+  let savedPopupLayoutMode = Defaults[.popupLayoutMode]
+  let savedSearchMode = Defaults[.searchMode]
   let history = History.shared
 
   override func setUp() {
     super.setUp()
     history.clearAll()
+    try? Storage.shared.context.delete(model: HistoryTag.self)
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+    history.tags.removeAll()
+    history.selectTag(nil)
     Defaults[.size] = 10
     Defaults[.sortBy] = .firstCopiedAt
+    Defaults[.popupLayoutMode] = .list
+    Defaults[.searchMode] = .exact
   }
 
   override func tearDown() {
     super.tearDown()
     Defaults[.size] = savedSize
     Defaults[.sortBy] = savedSortBy
+    Defaults[.popupLayoutMode] = savedPopupLayoutMode
+    Defaults[.searchMode] = savedSearchMode
   }
 
   func testDefaultIsEmpty() {
@@ -233,6 +244,96 @@ class HistoryTests: XCTestCase {
     XCTAssertEqual(history.items, [bar])
   }
 
+  func testTagCRUD() {
+    XCTAssertEqual(history.tags.count, 0)
+
+    let created = history.createTag(name: "Work", color: .blue)
+    XCTAssertNotNil(created)
+    XCTAssertEqual(history.tags.count, 1)
+    XCTAssertEqual(history.tags.first?.name, "Work")
+    XCTAssertEqual(history.tags.first?.colorKey, ShelfTagColor.blue.rawValue)
+
+    XCTAssertNil(history.createTag(name: "work", color: .teal))
+    XCTAssertEqual(history.tags.count, 1)
+
+    let renamed = history.renameTag(id: created!.id, to: "Inbox")
+    XCTAssertTrue(renamed)
+    XCTAssertEqual(history.tags.first?.name, "Inbox")
+
+    history.deleteTag(id: created!.id)
+    XCTAssertEqual(history.tags.count, 0)
+  }
+
+  func testAssignMoveAndRemoveTag() {
+    let first = history.add(historyItem("foo"))
+    let second = history.add(historyItem("bar"))
+    let work = history.createTag(name: "Work", color: .emerald)!
+    let code = history.createTag(name: "Code", color: .indigo)!
+
+    XCTAssertTrue(history.assignTag(tagID: work.id, toItemID: first.id))
+    XCTAssertEqual(first.item.tag?.id, work.id)
+    XCTAssertNil(second.item.tag)
+
+    XCTAssertTrue(history.assignTag(tagID: code.id, toItemID: first.id))
+    XCTAssertEqual(first.item.tag?.id, code.id)
+
+    history.removeTag(from: first)
+    XCTAssertNil(first.item.tag)
+  }
+
+  func testTagAndSearchFiltersIntersectInShelfMode() {
+    Defaults[.popupLayoutMode] = .shelf
+
+    let alpha = history.add(historyItem("alpha text"))
+    let beta = history.add(historyItem("beta text"))
+    let gamma = history.add(historyItem("gamma text"))
+    let work = history.createTag(name: "Work", color: .orange)!
+    let links = history.createTag(name: "Links", color: .teal)!
+
+    XCTAssertTrue(history.assignTag(tagID: work.id, toItemID: alpha.id))
+    XCTAssertTrue(history.assignTag(tagID: work.id, toItemID: beta.id))
+    XCTAssertTrue(history.assignTag(tagID: links.id, toItemID: gamma.id))
+
+    history.selectTag(work.id)
+    XCTAssertEqual(Set(history.items.map(\.id)), Set([alpha.id, beta.id]))
+
+    history.searchQuery = "alpha"
+    waitForSearchThrottle()
+    XCTAssertEqual(history.items.count, 1)
+    XCTAssertEqual(history.items.first?.id, alpha.id)
+
+    history.searchQuery = ""
+    waitForSearchThrottle()
+    XCTAssertEqual(Set(history.items.map(\.id)), Set([alpha.id, beta.id]))
+
+    history.selectTag(nil)
+    XCTAssertEqual(Set(history.items.map(\.id)), Set([alpha.id, beta.id, gamma.id]))
+  }
+
+  func testAddingSamePreservesTag() {
+    let first = history.add(historyItem("foo"))
+    let work = history.createTag(name: "Work", color: .blue)!
+    XCTAssertTrue(history.assignTag(tagID: work.id, toItemID: first.id))
+
+    _ = history.add(historyItem("foo"))
+
+    XCTAssertEqual(history.items.count, 1)
+    XCTAssertEqual(history.items.first?.item.tag?.id, work.id)
+  }
+
+  func testClearAllKeepsTags() {
+    let first = history.add(historyItem("foo"))
+    let work = history.createTag(name: "Work", color: .blue)!
+    XCTAssertTrue(history.assignTag(tagID: work.id, toItemID: first.id))
+    XCTAssertEqual(history.tags.count, 1)
+
+    history.clearAll()
+
+    XCTAssertEqual(history.items.count, 0)
+    XCTAssertEqual(history.tags.count, 1)
+    XCTAssertEqual(history.tags.first?.id, work.id)
+  }
+
   private func historyItem(_ value: String) -> HistoryItem {
     let contents = [
       HistoryItemContent(
@@ -247,5 +348,9 @@ class HistoryTests: XCTestCase {
     item.title = item.generateTitle()
 
     return item
+  }
+
+  private func waitForSearchThrottle() {
+    RunLoop.main.run(until: Date().addingTimeInterval(0.35))
   }
 }
