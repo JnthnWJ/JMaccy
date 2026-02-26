@@ -620,6 +620,15 @@ private struct ShelfTopStripView: View {
 
 private struct ShelfTagColorPicker: View {
   @Binding var selectedColor: ShelfTagColor
+  @Environment(\.colorScheme) private var colorScheme
+
+  private var selectedOuterRingColor: Color {
+    colorScheme == .light ? Color.black.opacity(0.7) : Color.white.opacity(0.96)
+  }
+
+  private var selectedInnerRingColor: Color {
+    colorScheme == .light ? Color.white.opacity(0.92) : Color.black.opacity(0.5)
+  }
 
   var body: some View {
     HStack(spacing: 10) {
@@ -632,11 +641,22 @@ private struct ShelfTagColorPicker: View {
             .frame(width: 16, height: 16)
             .overlay {
               Circle()
-                .strokeBorder(
-                  selectedColor == color ? Color.white : Color.white.opacity(0.2),
-                  lineWidth: selectedColor == color ? 2.5 : 1
-                )
-                .padding(-3)
+                .strokeBorder(Color.white.opacity(0.2), lineWidth: selectedColor == color ? 0 : 1)
+                .padding(-2)
+            }
+            .overlay {
+              if selectedColor == color {
+                Circle()
+                  .strokeBorder(selectedOuterRingColor, lineWidth: 2)
+                  .padding(-5)
+              }
+            }
+            .overlay {
+              if selectedColor == color {
+                Circle()
+                  .strokeBorder(selectedInnerRingColor, lineWidth: 1.25)
+                  .padding(-3.5)
+              }
             }
         }
         .buttonStyle(.plain)
