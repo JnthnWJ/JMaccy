@@ -58,14 +58,28 @@ struct StorageSettingsPane: View {
 
   @Default(.size) private var size
   @Default(.sortBy) private var sortBy
+  @Default(.syncEnabled) private var syncEnabled
+  @Default(.syncScope) private var syncScope
+  @Default(.encryptionEnabled) private var encryptionEnabled
+  @Default(.unlockPolicy) private var unlockPolicy
+  @Default(.unlockTimeoutMinutes) private var unlockTimeoutMinutes
+  @Default(.cloudSyncStatus) private var cloudSyncStatus
 
   @State private var viewModel = ViewModel()
   @State private var storageSize = Storage.shared.size
+  @State private var syncManager = SyncEncryptionManager.shared
 
   private let sizeFormatter: NumberFormatter = {
     let formatter = NumberFormatter()
     formatter.minimum = 1
     formatter.maximum = 999
+    return formatter
+  }()
+
+  private let timeoutFormatter: NumberFormatter = {
+    let formatter = NumberFormatter()
+    formatter.minimum = 1
+    formatter.maximum = 1_440
     return formatter
   }()
 
@@ -118,6 +132,94 @@ struct StorageSettingsPane: View {
         .labelsHidden()
         .frame(width: 160, alignment: .leading)
         .help(Text("SortByTooltip", tableName: "StorageSettings"))
+      }
+
+      Settings.Section(
+        bottomDivider: true,
+        label: { Text("SyncEncryption", tableName: "StorageSettings") }
+      ) {
+        Toggle(isOn: $syncEnabled) {
+          Text("EnableSync", tableName: "StorageSettings")
+        }
+
+        Picker(selection: $syncScope) {
+          ForEach(SyncScope.allCases) { scope in
+            Text(scope.description).tag(scope)
+          }
+        } label: {
+          Text("SyncScope", tableName: "StorageSettings")
+        }
+        .onChange(of: syncScope) { _, _ in
+          SyncEncryptionManager.shared.handleSyncScopeChanged()
+        }
+
+        Text("TagsAlwaysSyncDescription", tableName: "StorageSettings")
+          .controlSize(.small)
+          .foregroundStyle(.gray)
+
+        Toggle(isOn: $encryptionEnabled) {
+          Text("EnableEncryption", tableName: "StorageSettings")
+        }
+        .onChange(of: encryptionEnabled) { _, newValue in
+          if newValue {
+            SyncEncryptionManager.shared.enableEncryptionFromUI()
+          } else {
+            SyncEncryptionManager.shared.disableEncryptionAndWipeFromUI()
+          }
+        }
+
+        if encryptionEnabled {
+          Picker(selection: $unlockPolicy) {
+            ForEach(UnlockPolicy.allCases) { policy in
+              Text(policy.description).tag(policy)
+            }
+          } label: {
+            Text("UnlockPolicy", tableName: "StorageSettings")
+          }
+
+          if unlockPolicy == .timer {
+            HStack {
+              Text("UnlockTimeout", tableName: "StorageSettings")
+              TextField("", value: $unlockTimeoutMinutes, formatter: timeoutFormatter)
+                .frame(width: 60)
+              Text("MinutesSuffix", tableName: "StorageSettings")
+                .foregroundStyle(.secondary)
+            }
+          }
+
+          if syncManager.isLocked {
+            HStack {
+              Text("VaultLockedLabel", tableName: "StorageSettings")
+              Spacer()
+              Button(action: {
+                SyncEncryptionManager.shared.unlockWithPrompt()
+              }, label: {
+                Text("Unlock", tableName: "StorageSettings")
+              })
+            }
+          }
+
+          HStack {
+            Button(role: .destructive, action: {
+              SyncEncryptionManager.shared.resetEncryptedVaultFromUI()
+            }, label: {
+              Text("ResetEncryptedVault", tableName: "StorageSettings")
+            })
+            Spacer()
+          }
+        }
+
+        Text(syncManager.statusText.isEmpty ? cloudSyncStatus.description : syncManager.statusText)
+          .controlSize(.small)
+          .foregroundStyle(.gray)
+
+        Text("SyncScopeWarning", tableName: "StorageSettings")
+          .controlSize(.small)
+          .foregroundStyle(.gray)
+
+        Text("EncryptionDisableWarning", tableName: "StorageSettings")
+          .controlSize(.small)
+          .foregroundStyle(.gray)
       }
     }
   }

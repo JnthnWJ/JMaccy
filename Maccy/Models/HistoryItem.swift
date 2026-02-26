@@ -59,9 +59,12 @@ class HistoryItem {
     NSPasteboard.PasteboardType.notesRichText.rawValue
   ]
 
+  var id: UUID = UUID()
   var application: String?
   var firstCopiedAt: Date = Date.now
   var lastCopiedAt: Date = Date.now
+  var updatedAt: Date = Date.now
+  var tagAssignmentUpdatedAt: Date = Date.now
   var numberOfCopies: Int = 1
   var pin: String?
   var tag: HistoryTag?
@@ -71,8 +74,11 @@ class HistoryItem {
   var contents: [HistoryItemContent] = []
 
   init(contents: [HistoryItemContent] = []) {
+    self.id = UUID()
     self.firstCopiedAt = firstCopiedAt
     self.lastCopiedAt = lastCopiedAt
+    self.updatedAt = Date.now
+    self.tagAssignmentUpdatedAt = Date.now
     self.contents = contents
   }
 

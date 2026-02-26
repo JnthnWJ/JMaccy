@@ -138,7 +138,6 @@ private struct ShelfContentView: View {
     .padding(.vertical, 14)
     .onAppear {
       appState.shelfPreview.closeAll()
-      appState.history.selectTag(nil)
       searchFocused = false
       searchExpanded = false
       appState.navigator.highlightShelfFirst()

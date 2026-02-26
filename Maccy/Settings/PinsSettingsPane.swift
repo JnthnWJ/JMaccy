@@ -119,7 +119,7 @@ struct PinsSettingsPane: View {
   private var items: [HistoryItem]
 
   @State private var availablePins: [String] = []
-  @State private var selection: PersistentIdentifier?
+  @State private var selection: UUID?
 
   var body: some View {
     VStack(alignment: .leading) {

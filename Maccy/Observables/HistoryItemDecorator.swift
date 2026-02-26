@@ -39,7 +39,7 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
   static var previewImageSize: NSSize { NSScreen.forPopup?.visibleFrame.size ?? NSSize(width: 2048, height: 1536) }
   static var thumbnailImageSize: NSSize { NSSize(width: 340, height: Defaults[.imageMaxHeight]) }
 
-  let id = UUID()
+  var id: UUID { item.id }
 
   var title: String = ""
   var attributedTitle: AttributedString?

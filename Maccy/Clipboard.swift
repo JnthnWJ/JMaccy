@@ -150,6 +150,11 @@ class Clipboard {
   @objc
   @MainActor
   func checkForChangesInPasteboard() { // swiftlint:disable:this cyclomatic_complexity
+    guard SyncEncryptionManager.shared.canCaptureClipboard() else {
+      SyncEncryptionManager.shared.notifyCapturePausedIfNeeded()
+      return
+    }
+
     guard pasteboard.changeCount != changeCount else {
       return
     }

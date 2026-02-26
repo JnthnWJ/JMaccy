@@ -1,6 +1,69 @@
 import AppKit
 import Defaults
 
+enum SyncScope: String, Codable, CaseIterable, Identifiable, Defaults.Serializable {
+  case all
+  case pinnedOnly
+  case textOnly
+
+  var id: Self { self }
+
+  var description: String {
+    switch self {
+    case .all:
+      return NSLocalizedString("SyncScopeAll", tableName: "StorageSettings", comment: "")
+    case .pinnedOnly:
+      return NSLocalizedString("SyncScopePinnedOnly", tableName: "StorageSettings", comment: "")
+    case .textOnly:
+      return NSLocalizedString("SyncScopeTextOnly", tableName: "StorageSettings", comment: "")
+    }
+  }
+}
+
+enum UnlockPolicy: String, Codable, CaseIterable, Identifiable, Defaults.Serializable {
+  case onSleepOrRestart
+  case timer
+  case strictPerAction
+
+  var id: Self { self }
+
+  var description: String {
+    switch self {
+    case .onSleepOrRestart:
+      return NSLocalizedString("UnlockPolicySleepRestart", tableName: "StorageSettings", comment: "")
+    case .timer:
+      return NSLocalizedString("UnlockPolicyTimer", tableName: "StorageSettings", comment: "")
+    case .strictPerAction:
+      return NSLocalizedString("UnlockPolicyStrict", tableName: "StorageSettings", comment: "")
+    }
+  }
+}
+
+enum CloudSyncStatus: String, Codable, CaseIterable, Identifiable, Defaults.Serializable {
+  case healthy
+  case unavailable
+  case authRequired
+  case quotaExceeded
+  case error
+
+  var id: Self { self }
+
+  var description: String {
+    switch self {
+    case .healthy:
+      return NSLocalizedString("CloudSyncStatusHealthy", tableName: "StorageSettings", comment: "")
+    case .unavailable:
+      return NSLocalizedString("CloudSyncStatusUnavailable", tableName: "StorageSettings", comment: "")
+    case .authRequired:
+      return NSLocalizedString("CloudSyncStatusAuthRequired", tableName: "StorageSettings", comment: "")
+    case .quotaExceeded:
+      return NSLocalizedString("CloudSyncStatusQuotaExceeded", tableName: "StorageSettings", comment: "")
+    case .error:
+      return NSLocalizedString("CloudSyncStatusError", tableName: "StorageSettings", comment: "")
+    }
+  }
+}
+
 struct StorageType {
   static let files = StorageType(types: [.fileURL])
   static let images = StorageType(types: [.png, .tiff])
@@ -56,6 +119,17 @@ extension Defaults.Keys {
   static let size = Key<Int>("historySize", default: 200)
   static let sortBy = Key<Sorter.By>("sortBy", default: .lastCopiedAt)
   static let suppressClearAlert = Key<Bool>("suppressClearAlert", default: false)
+  static let syncEnabled = Key<Bool>("syncEnabled", default: false)
+  static let syncScope = Key<SyncScope>("syncScope", default: .all)
+  static let encryptionEnabled = Key<Bool>("encryptionEnabled", default: false)
+  static let unlockPolicy = Key<UnlockPolicy>("unlockPolicy", default: .onSleepOrRestart)
+  static let unlockTimeoutMinutes = Key<Int>("unlockTimeoutMinutes", default: 5)
+  static let cloudSyncStatus = Key<CloudSyncStatus>("cloudSyncStatus", default: .healthy)
+  static let encryptedVaultVersion = Key<Int>("encryptedVaultVersion", default: 1)
+  static let encryptionSalt = Key<Data?>("encryptionSalt", default: nil)
+  static let encryptionVerifier = Key<Data?>("encryptionVerifier", default: nil)
+  static let syncItemTombstones = Key<Data?>("syncItemTombstones", default: nil)
+  static let syncTagTombstones = Key<Data?>("syncTagTombstones", default: nil)
   static let windowSize = Key<NSSize>("windowSize", default: NSSize(width: 450, height: 800))
   static let windowPosition = Key<NSPoint>("windowPosition", default: NSPoint(x: 0.5, y: 0.8))
   static let showApplicationIcons = Key<Bool>("showApplicationIcons", default: false)

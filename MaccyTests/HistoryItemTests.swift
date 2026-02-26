@@ -1,10 +1,16 @@
 import XCTest
 import Defaults
+import SwiftData
 @testable import Maccy
 
 // swiftlint:disable force_try
 @MainActor
 class HistoryItemTests: XCTestCase {
+  override func setUp() {
+    super.setUp()
+    clearStorage()
+  }
+
   func testTitleForString() {
     let title = "foo"
     let item = historyItem(title)
@@ -193,6 +199,24 @@ class HistoryItemTests: XCTestCase {
     item.title = item.generateTitle()
 
     return item
+  }
+
+  private func clearStorage() {
+    let context = Storage.shared.context
+
+    let items = (try? context.fetch(FetchDescriptor<HistoryItem>())) ?? []
+    for item in items {
+      item.tag = nil
+      context.delete(item)
+    }
+
+    let tags = (try? context.fetch(FetchDescriptor<HistoryTag>())) ?? []
+    for tag in tags {
+      context.delete(tag)
+    }
+
+    context.processPendingChanges()
+    try? context.save()
   }
 }
 // swiftlint:enable force_try

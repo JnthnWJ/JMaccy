@@ -2,6 +2,7 @@ import Defaults
 import KeyboardShortcuts
 import Sparkle
 import SwiftUI
+import AppKit
 
 class AppDelegate: NSObject, NSApplicationDelegate {
   var panel: FloatingPanel<ContentView>!
@@ -22,6 +23,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private var statusItemVisibilityObserver: NSKeyValueObservation?
+  private var willSleepObserver: NSObjectProtocol?
 
   func applicationWillFinishLaunching(_ notification: Notification) { // swiftlint:disable:this function_body_length
     #if DEBUG
@@ -36,6 +38,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Bridge FloatingPanel via AppDelegate.
     AppState.shared.appDelegate = self
+    SyncEncryptionManager.shared.bootstrap()
 
     Clipboard.shared.onNewCopy { History.shared.add($0) }
     Clipboard.shared.start()
@@ -86,6 +89,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.appearsDisabled = isStatusItemDisabled
       }
     }
+
+    willSleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.willSleepNotification,
+      object: nil,
+      queue: .main
+    ) { _ in
+      SyncEncryptionManager.shared.handleSystemWillSleep()
+    }
   }
 
   func applicationDidFinishLaunching(_ aNotification: Notification) {
@@ -108,6 +119,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    SyncEncryptionManager.shared.lock(reason: .manual)
     if Defaults[.clearOnQuit] {
       AppState.shared.history.clear()
     }

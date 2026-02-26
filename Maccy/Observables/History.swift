@@ -150,11 +150,13 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     Storage.shared.context.insert(item)
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
+    SyncEncryptionManager.shared.handleHistoryMutation()
   }
 
   @discardableResult
   @MainActor
   func add(_ item: HistoryItem) -> HistoryItemDecorator {
+    item.updatedAt = Date.now
     if #available(macOS 15.0, *) {
       try? History.shared.insertIntoStorage(item)
     } else {
@@ -172,6 +174,8 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       item.pin = existingHistoryItem.pin
       item.title = existingHistoryItem.title
       item.tag = existingHistoryItem.tag
+      item.id = existingHistoryItem.id
+      item.tagAssignmentUpdatedAt = existingHistoryItem.tagAssignmentUpdatedAt
       if !item.fromMaccy {
         item.application = existingHistoryItem.application
       }
@@ -214,6 +218,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     applyCurrentFilters()
     updateUnpinnedShortcuts()
     AppState.shared.popup.needsResize = true
+    SyncEncryptionManager.shared.handleHistoryMutation()
 
     return itemDecorator
   }
@@ -234,31 +239,30 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   @MainActor
   func clear() {
     withLogging("Clearing history") {
-      all.forEach { item in
-        if item.isUnpinned {
-          cleanup(item)
-        }
-      }
+      let descriptor = FetchDescriptor<HistoryItem>(
+        predicate: #Predicate { $0.pin == nil }
+      )
+      let storedItems = (try? Storage.shared.context.fetch(descriptor)) ?? []
+      let removedIDs = storedItems.map(\.id)
+
+      all.filter(\.isUnpinned).forEach { cleanup($0) }
       all.removeAll(where: \.isUnpinned)
       sessionLog.removeValues { $0.pin == nil }
       applyCurrentFilters()
 
-      try? Storage.shared.context.transaction {
-        try? Storage.shared.context.delete(
-          model: HistoryItem.self,
-          where: #Predicate { $0.pin == nil }
-        )
-        try? Storage.shared.context.delete(
-          model: HistoryItemContent.self,
-          where: #Predicate { $0.item?.pin == nil }
-        )
+      for item in storedItems {
+        item.tag = nil
+        Storage.shared.context.delete(item)
       }
       Storage.shared.context.processPendingChanges()
       try? Storage.shared.context.save()
+
+      removedIDs.forEach { SyncEncryptionManager.shared.recordDeletedItem(id: $0) }
     }
 
     Clipboard.shared.clear()
     AppState.shared.popup.close()
+    SyncEncryptionManager.shared.handleHistoryMutation()
     Task {
       AppState.shared.popup.needsResize = true
     }
@@ -267,20 +271,27 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   @MainActor
   func clearAll() {
     withLogging("Clearing all history") {
-      all.forEach { item in
-        cleanup(item)
-      }
+      let storedItems = (try? Storage.shared.context.fetch(FetchDescriptor<HistoryItem>())) ?? []
+      let removedIDs = storedItems.map(\.id)
+
+      all.forEach { cleanup($0) }
       all.removeAll()
       sessionLog.removeAll()
       applyCurrentFilters()
 
-      try? Storage.shared.context.delete(model: HistoryItem.self)
+      for item in storedItems {
+        item.tag = nil
+        Storage.shared.context.delete(item)
+      }
       Storage.shared.context.processPendingChanges()
       try? Storage.shared.context.save()
+
+      removedIDs.forEach { SyncEncryptionManager.shared.recordDeletedItem(id: $0) }
     }
 
     Clipboard.shared.clear()
     AppState.shared.popup.close()
+    SyncEncryptionManager.shared.handleHistoryMutation()
     Task {
       AppState.shared.popup.needsResize = true
     }
@@ -291,6 +302,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     guard let item else { return }
 
     cleanup(item)
+    let deletedID = item.item.id
     withLogging("Removing history item") {
       Storage.shared.context.delete(item.item)
       Storage.shared.context.processPendingChanges()
@@ -302,6 +314,8 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
     applyCurrentFilters()
     updateUnpinnedShortcuts()
+    SyncEncryptionManager.shared.recordDeletedItem(id: deletedID)
+    SyncEncryptionManager.shared.handleHistoryMutation()
     Task {
       AppState.shared.popup.needsResize = true
     }
@@ -335,11 +349,13 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     item.item.title = item.item.generateTitle()
     item.title = item.item.title
     item.attributedTitle = nil
+    item.item.updatedAt = Date.now
 
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
 
     applyCurrentFilters()
+    SyncEncryptionManager.shared.handleHistoryMutation()
     AppState.shared.popup.needsResize = true
 
     return true
@@ -372,11 +388,13 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     item.attributedTitle = nil
     item.cleanupImages()
     item.ensureThumbnailImage()
+    item.item.updatedAt = Date.now
 
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
 
     applyCurrentFilters()
+    SyncEncryptionManager.shared.handleHistoryMutation()
     AppState.shared.popup.needsResize = true
 
     return true
@@ -428,6 +446,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     Task {
       searchQuery = ""
     }
+    SyncEncryptionManager.shared.recordProtectedActionCompleted()
   }
 
   @MainActor
@@ -467,6 +486,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     Task {
       searchQuery = ""
     }
+    SyncEncryptionManager.shared.recordProtectedActionCompleted()
   }
 
   func handlePasteStack() {
@@ -507,6 +527,9 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
           return
         }
       }
+      await MainActor.run {
+        SyncEncryptionManager.shared.recordProtectedActionCompleted()
+      }
     }
   }
 
@@ -523,6 +546,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     guard let item else { return }
 
     item.togglePin()
+    item.item.updatedAt = Date.now
 
     let sortedItems = sorter.sort(all.map(\.item))
     if let currentIndex = all.firstIndex(of: item),
@@ -538,6 +562,9 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     if item.isUnpinned {
       AppState.shared.navigator.scrollTarget = item.id
     }
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+    SyncEncryptionManager.shared.handleHistoryMutation()
   }
 
   @MainActor
@@ -576,11 +603,13 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     guard isTagNameAvailable(normalizedName) else { return nil }
 
     let tag = HistoryTag(name: normalizedName, colorKey: color.rawValue)
+    tag.updatedAt = Date.now
     Storage.shared.context.insert(tag)
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
     loadTags()
     AppState.shared.popup.needsResize = true
+    SyncEncryptionManager.shared.handleHistoryMutation()
 
     return tag
   }
@@ -600,7 +629,21 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     try? Storage.shared.context.save()
     loadTags()
     AppState.shared.popup.needsResize = true
+    SyncEncryptionManager.shared.handleHistoryMutation()
 
+    return true
+  }
+
+  @MainActor
+  @discardableResult
+  func recolorTag(id: UUID, color: ShelfTagColor) -> Bool {
+    guard let tag = tags.first(where: { $0.id == id }) else { return false }
+    tag.colorKey = color.rawValue
+    tag.updatedAt = Date.now
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+    loadTags()
+    SyncEncryptionManager.shared.handleHistoryMutation()
     return true
   }
 
@@ -612,11 +655,13 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       selectedTagID = nil
     }
 
+    SyncEncryptionManager.shared.recordDeletedTag(id: id)
     Storage.shared.context.delete(tag)
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
     loadTags()
     applyCurrentFilters()
+    SyncEncryptionManager.shared.handleHistoryMutation()
     AppState.shared.popup.needsResize = true
   }
 
@@ -627,9 +672,12 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     guard let tag = tags.first(where: { $0.id == tagID }) else { return false }
 
     item.item.tag = tag
+    item.item.updatedAt = Date.now
+    item.item.tagAssignmentUpdatedAt = Date.now
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
     applyCurrentFilters()
+    SyncEncryptionManager.shared.handleHistoryMutation()
 
     return true
   }
@@ -637,9 +685,12 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   @MainActor
   func removeTag(from item: HistoryItemDecorator) {
     item.item.tag = nil
+    item.item.updatedAt = Date.now
+    item.item.tagAssignmentUpdatedAt = Date.now
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
     applyCurrentFilters()
+    SyncEncryptionManager.shared.handleHistoryMutation()
   }
 
   @MainActor
@@ -663,15 +714,19 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     let descriptor = FetchDescriptor<HistoryTag>(
       sortBy: [SortDescriptor(\.createdAt), SortDescriptor(\.name)]
     )
-    tags = (try? Storage.shared.context.fetch(descriptor)) ?? []
+    guard let fetchedTags = try? Storage.shared.context.fetch(descriptor) else {
+      return
+    }
 
-    if let selectedTagID, !tags.contains(where: { $0.id == selectedTagID }) {
+    tags = fetchedTags
+
+    if let selectedTagID, !fetchedTags.contains(where: { $0.id == selectedTagID }) {
       self.selectedTagID = nil
     }
   }
 
   private func filteredItemsByTag() -> [HistoryItemDecorator] {
-    guard AppState.shared.shelfModeEnabled, let selectedTagID else {
+    guard Defaults[.popupLayoutMode] == .shelf, let selectedTagID else {
       return all
     }
 
