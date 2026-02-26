@@ -43,7 +43,6 @@ enum KeyChord: CaseIterable {
   case selectCurrentItem
   case close
   case togglePreview
-  case toggleShelfPreview
   case unknown
 
   init(_ event: NSEvent?) {
@@ -133,8 +132,6 @@ enum KeyChord: CaseIterable {
       self = .close
     case (KeyChord.previewKey, KeyChord.previewModifiers):
       self = .togglePreview
-    case (.space, []):
-      self = .toggleShelfPreview
     case (_, _) where !modifierFlags.isDisjoint(with: [.command, .control, .option]):
       self = .ignored
     default:

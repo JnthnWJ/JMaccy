@@ -222,13 +222,6 @@ struct KeyHandlingView<Content: View>: View {
       }
       appState.navigator.highlightShelfNext()
       return true
-    case .toggleShelfPreview:
-      guard shelfMode, !searchInputActive else {
-        return false
-      }
-      appState.shelfPreview.toggle()
-      appState.popup.needsResize = true
-      return true
     case .close:
       if shelfMode, searchFocused {
         searchFocused = false
@@ -249,10 +242,15 @@ struct KeyHandlingView<Content: View>: View {
       appState.popup.close()
       return true
     case .togglePreview:
-      guard !shelfMode else {
-        return false
+      if shelfMode {
+        guard !searchInputActive else {
+          return false
+        }
+        appState.shelfPreview.toggle()
+        appState.popup.needsResize = true
+      } else {
+        appState.preview.togglePreview()
       }
-      appState.preview.togglePreview()
       return true
     default:
       ()

@@ -379,7 +379,7 @@ class MaccyUITests: XCTestCase {
 
   func testDeleteEntry() {
     popUpWithMouse()
-    app.typeKey(.delete, modifierFlags: [.option])
+    app.typeKey(.delete, modifierFlags: [])
     assertNotExists(items[copy1])
 
     app.typeKey(.escape, modifierFlags: [])
@@ -390,7 +390,7 @@ class MaccyUITests: XCTestCase {
   func testDeleteEntryDuringSearch() {
     popUpWithMouse()
     search(copy2)
-    app.typeKey(.delete, modifierFlags: [.option])
+    app.typeKey(.delete, modifierFlags: [])
     assertNotExists(items[copy2])
 
     app.typeKey(.escape, modifierFlags: [])
