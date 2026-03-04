@@ -707,6 +707,16 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   }
 
   @MainActor
+  func copyImageText(from item: HistoryItemDecorator) {
+    guard item.canCopyImageText else {
+      return
+    }
+
+    Clipboard.shared.copy(item.copyableImageText)
+    SyncEncryptionManager.shared.recordProtectedActionCompleted()
+  }
+
+  @MainActor
   func isTagNameAvailable(_ name: String, excludingID: UUID? = nil) -> Bool {
     let normalizedName = normalizeTagName(name)
     guard !normalizedName.isEmpty else { return false }

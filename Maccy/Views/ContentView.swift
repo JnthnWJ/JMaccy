@@ -879,6 +879,10 @@ private struct ShelfCardView: View {
   @Environment(AppState.self) private var appState
 
   var body: some View {
+    let hasImage = item.hasImage
+    let thumbnailImage = item.thumbnailImage
+    let cardTitle = item.title.isEmpty ? item.text.shortened(to: 80) : item.title.shortened(to: 80)
+
     Button {
       onCardTap(item.id)
     } label: {
@@ -909,22 +913,27 @@ private struct ShelfCardView: View {
         .background(item.shelfHeaderColor)
 
         Group {
-          if let image = item.thumbnailImage {
+          if hasImage {
             GeometryReader { geometry in
-              let containerWidth = geometry.size.width
-              let safeImageWidth = max(image.size.width, 1)
-              let renderedImageHeight = containerWidth * image.size.height / safeImageWidth
+              if let image = thumbnailImage {
+                let containerWidth = geometry.size.width
+                let safeImageWidth = max(image.size.width, 1)
+                let renderedImageHeight = containerWidth * image.size.height / safeImageWidth
 
-              Image(nsImage: image)
-                .resizable()
-                // Keep the top of screenshots visible; crop from the bottom when needed.
-                .frame(width: containerWidth, height: renderedImageHeight, alignment: .top)
-                .frame(width: containerWidth, height: geometry.size.height, alignment: .top)
+                Image(nsImage: image)
+                  .resizable()
+                  // Keep the top of screenshots visible; crop from the bottom when needed.
+                  .frame(width: containerWidth, height: renderedImageHeight, alignment: .top)
+                  .frame(width: containerWidth, height: geometry.size.height, alignment: .top)
+              } else {
+                ProgressView()
+                  .frame(maxWidth: .infinity, maxHeight: .infinity)
+              }
             }
               .clipped()
           } else {
             VStack(alignment: .leading, spacing: 8) {
-              Text(item.title.isEmpty ? item.text.shortened(to: 80) : item.title.shortened(to: 80))
+              Text(cardTitle)
                 .font(.headline)
                 .lineLimit(2)
 
@@ -971,10 +980,20 @@ private struct ShelfCardView: View {
     .draggable(item.id.uuidString)
     .accessibilityIdentifier("shelf-card")
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel(Text(verbatim: item.title.isEmpty ? item.text.shortened(to: 80) : item.title.shortened(to: 80)))
+    .accessibilityLabel(Text(verbatim: cardTitle))
     .accessibilityValue(Text(verbatim: isSelected ? "selected" : "unselected"))
     .contextMenu {
+      if item.canCopyImageText {
+        Button("Copy Image Text") {
+          appState.history.copyImageText(from: item)
+        }
+      }
+
       if item.isTagged {
+        if item.canCopyImageText {
+          Divider()
+        }
+
         Button("shelf_tag_remove_item") {
           appState.history.removeTag(from: item)
         }

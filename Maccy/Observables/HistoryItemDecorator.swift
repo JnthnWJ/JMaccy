@@ -7,6 +7,9 @@ import SwiftUI
 
 @Observable
 class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
+  private static let thumbnailCache = NSCache<NSString, NSImage>()
+  private static let previewCache = NSCache<NSString, NSImage>()
+
   enum ShelfCardType {
     case text
     case link
@@ -75,6 +78,14 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
 
   // 10k characters seems to be more than enough on large displays
   var text: String { item.previewableText.shortened(to: 10_000) }
+  var copyableImageText: String {
+    guard hasImage else {
+      return ""
+    }
+
+    return title.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+  var canCopyImageText: Bool { !copyableImageText.isEmpty }
 
   var isPinned: Bool { item.pin != nil }
   var isUnpinned: Bool { item.pin == nil }
@@ -155,6 +166,8 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     self.shortcuts = shortcuts
     self.title = item.title
     self.applicationImage = ApplicationImageCache.shared.getImage(item: item)
+    self.thumbnailImage = Self.thumbnailCache.object(forKey: self.cacheKey)
+    self.previewImage = Self.previewCache.object(forKey: self.cacheKey)
 
     synchronizeItemPin()
     synchronizeItemTitle()
@@ -171,7 +184,12 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     guard thumbnailImageGenerationTask == nil else {
       return
     }
-    thumbnailImageGenerationTask = Task { [weak self] in
+
+    thumbnailImageGenerationTask = Task { @MainActor [weak self] in
+      defer {
+        self?.thumbnailImageGenerationTask = nil
+      }
+
       self?.generateThumbnailImage()
     }
   }
@@ -187,7 +205,12 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     guard previewImageGenerationTask == nil else {
       return
     }
-    previewImageGenerationTask = Task { [weak self] in
+
+    previewImageGenerationTask = Task { @MainActor [weak self] in
+      defer {
+        self?.previewImageGenerationTask = nil
+      }
+
       self?.generatePreviewImage()
     }
   }
@@ -197,6 +220,7 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     if let image = previewImage {
       return image
     }
+
     ensurePreviewImage()
     _ = await previewImageGenerationTask?.result
     return previewImage
@@ -206,6 +230,10 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
   func cleanupImages() {
     thumbnailImageGenerationTask?.cancel()
     previewImageGenerationTask?.cancel()
+    thumbnailImageGenerationTask = nil
+    previewImageGenerationTask = nil
+    Self.thumbnailCache.removeObject(forKey: cacheKey)
+    Self.previewCache.removeObject(forKey: cacheKey)
     thumbnailImage?.recache()
     previewImage?.recache()
     thumbnailImage = nil
@@ -217,7 +245,11 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     guard let image = item.image else {
       return
     }
+
     thumbnailImage = image.resized(to: HistoryItemDecorator.thumbnailImageSize)
+    if let thumbnailImage {
+      Self.thumbnailCache.setObject(thumbnailImage, forKey: cacheKey)
+    }
   }
 
   @MainActor
@@ -225,7 +257,11 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     guard let image = item.image else {
       return
     }
+
     previewImage = image.resized(to: HistoryItemDecorator.previewImageSize)
+    if let previewImage {
+      Self.previewCache.setObject(previewImage, forKey: cacheKey)
+    }
   }
 
   @MainActor
@@ -302,5 +338,9 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
       hash = hash &* 1_099_511_628_211
     }
     return hash
+  }
+
+  private var cacheKey: NSString {
+    return id.uuidString as NSString
   }
 }

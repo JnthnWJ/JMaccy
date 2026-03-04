@@ -237,6 +237,11 @@ class HistoryItem {
   }
 
   private func recognizeTextHandler(request: VNRequest, error: Error?) {
+    if let error {
+      print("Unable to perform the request: \(error).")
+      return
+    }
+
     guard let observations = request.results as? [VNRecognizedTextObservation] else {
       return
     }

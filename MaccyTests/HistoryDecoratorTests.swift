@@ -65,8 +65,37 @@ class HistoryItemDecoratorTests: XCTestCase {
     let itemDecorator = historyItemDecorator(image)
     itemDecorator.sizeImages()
     XCTAssertEqual(itemDecorator.title, "")
+    XCTAssertFalse(itemDecorator.canCopyImageText)
     XCTAssertEqual(itemDecorator.previewImage!.size, image.size)
     XCTAssertEqual(itemDecorator.thumbnailImage!.size, image.size)
+  }
+
+  func testImageCopyableTextUsesOCRTitle() {
+    let image = NSImage(named: "StatusBarMenuImage")!
+    let itemDecorator = historyItemDecorator(image)
+
+    itemDecorator.item.title = "  copied from image  \n"
+    itemDecorator.title = itemDecorator.item.title
+
+    XCTAssertTrue(itemDecorator.canCopyImageText)
+    XCTAssertEqual(itemDecorator.copyableImageText, "copied from image")
+  }
+
+  func testCleanupImagesClearsImageGenerationTasks() {
+    let image = NSImage(named: "StatusBarMenuImage")!
+    let itemDecorator = historyItemDecorator(image)
+
+    itemDecorator.thumbnailImageGenerationTask = Task { () throws -> Void in
+      try await Task.sleep(for: .seconds(10))
+    }
+    itemDecorator.previewImageGenerationTask = Task { () throws -> Void in
+      try await Task.sleep(for: .seconds(10))
+    }
+
+    itemDecorator.cleanupImages()
+
+    XCTAssertNil(itemDecorator.thumbnailImageGenerationTask)
+    XCTAssertNil(itemDecorator.previewImageGenerationTask)
   }
 
   // We also need to add test for image with width bigger than max width.
