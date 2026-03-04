@@ -1,5 +1,6 @@
 import AppKit
 import CloudKit
+import CryptoKit
 import Defaults
 import SwiftData
 import XCTest
@@ -862,12 +863,109 @@ final class SyncReliabilityTests: XCTestCase {
   }
 }
 
+@MainActor
 final class SyncEncryptionManagerTests: XCTestCase {
+  private var savedEncryptionEnabled = false
+  private var savedEncryptionSalt: Data?
+  private var savedEncryptionVerifier: Data?
+  private var savedSyncEnabled = false
+
+  override func setUp() {
+    super.setUp()
+    savedEncryptionEnabled = Defaults[.encryptionEnabled]
+    savedEncryptionSalt = Defaults[.encryptionSalt]
+    savedEncryptionVerifier = Defaults[.encryptionVerifier]
+    savedSyncEnabled = Defaults[.syncEnabled]
+
+    Defaults[.syncEnabled] = false
+    Defaults[.encryptionEnabled] = false
+    Defaults[.encryptionSalt] = nil
+    Defaults[.encryptionVerifier] = nil
+
+    Storage.shared.clearEncryptedHistory()
+    Storage.shared.clearRuntimeHistory()
+    Storage.shared.clearPlainHistory()
+    Storage.shared.activatePlainRuntime()
+  }
+
+  override func tearDown() {
+    Storage.shared.clearEncryptedHistory()
+    Storage.shared.clearRuntimeHistory()
+    Storage.shared.clearPlainHistory()
+    Storage.shared.activatePlainRuntime()
+
+    Defaults[.syncEnabled] = savedSyncEnabled
+    Defaults[.encryptionEnabled] = savedEncryptionEnabled
+    Defaults[.encryptionSalt] = savedEncryptionSalt
+    Defaults[.encryptionVerifier] = savedEncryptionVerifier
+    super.tearDown()
+  }
+
   func testStartupOnlyPolicyDoesNotLockOnSleep() {
     XCTAssertFalse(UnlockPolicy.onStartup.locksOnSleep)
   }
 
   func testSleepAndStartupPolicyLocksOnSleep() {
     XCTAssertTrue(UnlockPolicy.onSleepOrRestart.locksOnSleep)
+  }
+
+  func testChangePasswordRotatesCredentials() {
+    Defaults[.encryptionEnabled] = true
+    let salt = Data(repeating: 7, count: 16)
+    let key = deriveKey(password: "old-password", salt: salt)
+    guard let verifier = encrypt(Data("maccy-vault-verifier-v1".utf8), with: key) else {
+      XCTFail("Failed to encrypt verifier")
+      return
+    }
+    Defaults[.encryptionSalt] = salt
+    Defaults[.encryptionVerifier] = verifier
+
+    let manager = SyncEncryptionManager(cloudStore: UnavailableCloudKitHistoryStore(), configureSyncObservers: false)
+
+    XCTAssertTrue(manager.unlock(password: "old-password"))
+
+    let item = HistoryItem(
+      contents: [HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue, value: Data("hello".utf8))]
+    )
+    let itemID = item.id
+    Storage.shared.context.insert(item)
+    try? Storage.shared.context.save()
+    manager.persistEncryptedVaultFromRuntime()
+
+    let changeExpectation = expectation(description: "password changed")
+
+    Task {
+      let changed = await manager.changePassword(currentPassword: "old-password", newPassword: "new-password")
+      XCTAssertTrue(changed)
+      changeExpectation.fulfill()
+    }
+
+    wait(for: [changeExpectation], timeout: 5.0)
+
+    XCTAssertEqual(item.id, itemID)
+    XCTAssertEqual(item.text, "hello")
+
+    manager.lock(reason: .manual)
+
+    XCTAssertFalse(manager.unlock(password: "old-password"))
+    XCTAssertTrue(manager.unlock(password: "new-password"))
+
+    let items = (try? Storage.shared.context.fetch(FetchDescriptor<HistoryItem>())) ?? []
+    XCTAssertEqual(items.count, 1)
+    XCTAssertEqual(items.first?.id, itemID)
+    XCTAssertEqual(items.first?.text, "hello")
+  }
+
+  private func deriveKey(password: String, salt: Data) -> SymmetricKey {
+    var data = salt + Data(password.utf8)
+    for _ in 0..<100_000 {
+      data = Data(SHA256.hash(data: data))
+    }
+    return SymmetricKey(data: data)
+  }
+
+  private func encrypt(_ data: Data, with key: SymmetricKey) -> Data? {
+    let box = try? AES.GCM.seal(data, using: key)
+    return box?.combined
   }
 }

@@ -605,6 +605,12 @@ class SyncEncryptionManager {
     }
   }
 
+  func changePasswordFromUI() {
+    Task { [weak self] in
+      await self?.changePasswordFlowFromUI()
+    }
+  }
+
   func disableEncryptionAndWipeFromUI() {
     let isConfigured = Defaults[.encryptionSalt] != nil || Defaults[.encryptionVerifier] != nil
     guard Defaults[.encryptionEnabled] || isConfigured else { return }
@@ -666,14 +672,68 @@ class SyncEncryptionManager {
   }
 
   @discardableResult
-  func unlock(password: String) -> Bool {
-    guard let salt = Defaults[.encryptionSalt],
-          let verifier = Defaults[.encryptionVerifier] else {
+  func changePassword(currentPassword: String, newPassword: String) async -> Bool {
+    guard Defaults[.encryptionEnabled] else { return false }
+    guard !newPassword.isEmpty else { return false }
+
+    guard let currentKey = verifiedKey(for: currentPassword) else {
+      statusText = NSLocalizedString("VaultStatusUnlockFailed", tableName: "StorageSettings", comment: "")
       return false
     }
 
-    let key = deriveKey(password: password, salt: salt)
-    guard let decrypted = try? decrypt(verifier, with: key), decrypted == Self.verifierData else {
+    if Defaults[.syncEnabled] {
+      _ = await waitForSyncIdle(maxWait: 5.0)
+    }
+
+    let wasLocked = isLocked
+    runtimeKey = currentKey
+    isLocked = false
+
+    if wasLocked {
+      loadRuntimeFromEncryptedVault()
+    }
+
+    if Defaults[.syncEnabled], let remoteSnapshot = try? await fetchRemoteSnapshot() {
+      var mergedSnapshot = merge(local: buildLocalSnapshot(), remote: remoteSnapshot)
+      resolveTagNameConflicts(&mergedSnapshot)
+      applySnapshotToRuntime(mergedSnapshot)
+    }
+
+    let snapshot = buildLocalSnapshot()
+    setPassword(newPassword)
+    persistEncryptedVaultFromRuntime()
+
+    var didUpdateCloudPassword = !Defaults[.syncEnabled]
+    if Defaults[.syncEnabled] {
+      do {
+        let records = try buildCloudRecords(from: snapshot)
+        try await cloudStore.save(records: records)
+        Defaults[.cloudSyncStatus] = .healthy
+        didUpdateCloudPassword = true
+      } catch {
+        let syncStatus = mapCloudError(error)
+        Defaults[.cloudSyncStatus] = syncStatus
+      }
+    }
+
+    statusText = didUpdateCloudPassword
+      ? localizedStorageSettingsString(key: "VaultStatusPasswordChanged", fallback: "Encryption password updated.")
+      : localizedStorageSettingsString(
+          key: "VaultStatusPasswordChangedPendingSync",
+          fallback: "Encryption password updated locally. iCloud sync will retry when it becomes available."
+        )
+    resetTimerLockIfNeeded()
+
+    Task {
+      try? await History.shared.load()
+    }
+
+    return true
+  }
+
+  @discardableResult
+  func unlock(password: String) -> Bool {
+    guard let key = verifiedKey(for: password) else {
       statusText = NSLocalizedString("VaultStatusUnlockFailed", tableName: "StorageSettings", comment: "")
       return false
     }
@@ -1480,6 +1540,58 @@ class SyncEncryptionManager {
     _ = unlock(password: password)
   }
 
+  private func changePasswordFlowFromUI() async {
+    let verifyTitle = localizedStorageSettingsString(
+      key: "VaultChangeVerifyTitle",
+      fallback: "Verify Current Password"
+    )
+    let verifyBody = localizedStorageSettingsString(
+      key: "VaultChangeVerifyBody",
+      fallback: "Enter your current encryption password before setting a new one."
+    )
+    let failedMessage = NSLocalizedString("VaultStatusUnlockFailed", tableName: "StorageSettings", comment: "")
+    var verifyMessage = verifyBody
+    var currentPassword: String?
+
+    while currentPassword == nil {
+      guard let candidate = promptForPassword(title: verifyTitle, informativeText: verifyMessage) else {
+        return
+      }
+
+      guard verifiedKey(for: candidate) != nil else {
+        verifyMessage = "\(failedMessage)\n\n\(verifyBody)"
+        continue
+      }
+
+      currentPassword = candidate
+    }
+
+    guard let currentPassword else { return }
+
+    guard let newPassword = promptForNewPassword(
+      title: localizedStorageSettingsString(
+        key: "VaultChangeTitle",
+        fallback: "Change Encryption Password"
+      ),
+      informativeText: localizedStorageSettingsString(
+        key: "VaultChangeBody",
+        fallback: "Set a new password used to encrypt clipboard history on disk and in iCloud sync."
+      ),
+      actionTitle: localizedStorageSettingsString(
+        key: "ChangePassword",
+        fallback: "Change password"
+      ),
+      mismatchMessage: localizedStorageSettingsString(
+        key: "VaultPasswordChangeMismatch",
+        fallback: "New passwords did not match. The password was not changed."
+      )
+    ) else {
+      return
+    }
+
+    _ = await changePassword(currentPassword: currentPassword, newPassword: newPassword)
+  }
+
   private func encodeForCloud(_ data: Data) throws -> (Data, Bool) {
     if Defaults[.encryptionEnabled], let key = runtimeKey {
       return (try encrypt(data, with: key), true)
@@ -1586,7 +1698,25 @@ class SyncEncryptionManager {
     return try AES.GCM.open(box, using: key)
   }
 
-  private func promptForPassword(title: String, informativeText: String) -> String? {
+  private func verifiedKey(for password: String) -> SymmetricKey? {
+    guard let salt = Defaults[.encryptionSalt],
+          let verifier = Defaults[.encryptionVerifier] else {
+      return nil
+    }
+
+    let key = deriveKey(password: password, salt: salt)
+    guard let decrypted = try? decrypt(verifier, with: key), decrypted == Self.verifierData else {
+      return nil
+    }
+
+    return key
+  }
+
+  private func localizedStorageSettingsString(key: String, fallback: String) -> String {
+    Bundle.main.localizedString(forKey: key, value: fallback, table: "StorageSettings")
+  }
+
+  private func promptForPassword(title: String, informativeText: String, actionTitle: String? = nil) -> String? {
     let alert = NSAlert()
     alert.alertStyle = .informational
     alert.messageText = title
@@ -1594,18 +1724,23 @@ class SyncEncryptionManager {
 
     let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
     alert.accessoryView = field
-    alert.addButton(withTitle: NSLocalizedString("Unlock", tableName: "StorageSettings", comment: ""))
+    alert.addButton(withTitle: actionTitle ?? NSLocalizedString("Unlock", tableName: "StorageSettings", comment: ""))
     alert.addButton(withTitle: NSLocalizedString("Cancel", comment: ""))
 
     guard alert.runModal() == .alertFirstButtonReturn else { return nil }
     return field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
-  private func promptForNewPassword() -> String? {
+  private func promptForNewPassword(
+    title: String = NSLocalizedString("VaultCreateTitle", tableName: "StorageSettings", comment: ""),
+    informativeText: String = NSLocalizedString("VaultCreateBody", tableName: "StorageSettings", comment: ""),
+    actionTitle: String = NSLocalizedString("SetPassword", tableName: "StorageSettings", comment: ""),
+    mismatchMessage: String = NSLocalizedString("VaultPasswordMismatch", tableName: "StorageSettings", comment: "")
+  ) -> String? {
     let alert = NSAlert()
     alert.alertStyle = .informational
-    alert.messageText = NSLocalizedString("VaultCreateTitle", tableName: "StorageSettings", comment: "")
-    alert.informativeText = NSLocalizedString("VaultCreateBody", tableName: "StorageSettings", comment: "")
+    alert.messageText = title
+    alert.informativeText = informativeText
 
     let password = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
     password.placeholderString = NSLocalizedString("VaultPasswordLabel", tableName: "StorageSettings", comment: "")
@@ -1631,7 +1766,7 @@ class SyncEncryptionManager {
     ])
 
     alert.accessoryView = accessory
-    alert.addButton(withTitle: NSLocalizedString("SetPassword", tableName: "StorageSettings", comment: ""))
+    alert.addButton(withTitle: actionTitle)
     alert.addButton(withTitle: NSLocalizedString("Cancel", comment: ""))
 
     guard alert.runModal() == .alertFirstButtonReturn else { return nil }
@@ -1640,7 +1775,7 @@ class SyncEncryptionManager {
     let confirmation = confirm.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !value.isEmpty else { return nil }
     guard value == confirmation else {
-      Notifier.notify(body: NSLocalizedString("VaultPasswordMismatch", tableName: "StorageSettings", comment: ""), sound: nil)
+      Notifier.notify(body: mismatchMessage, sound: nil)
       return nil
     }
     return value

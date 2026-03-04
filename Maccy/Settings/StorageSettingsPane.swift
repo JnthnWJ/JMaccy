@@ -220,6 +220,22 @@ struct StorageSettingsPane: View {
           }
 
           HStack {
+            Button(action: {
+              SyncEncryptionManager.shared.changePasswordFromUI()
+            }, label: {
+              Text(
+                Bundle.main.localizedString(
+                  forKey: "ChangePassword",
+                  value: "Change password",
+                  table: "StorageSettings"
+                )
+              )
+            })
+            .disabled(syncManager.isSyncInProgress)
+            Spacer()
+          }
+
+          HStack {
             Button(role: .destructive, action: {
               SyncEncryptionManager.shared.resetEncryptedVaultFromUI()
             }, label: {
