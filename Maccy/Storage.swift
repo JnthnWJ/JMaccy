@@ -646,10 +646,22 @@ class SyncEncryptionManager {
   }
 
   func unlockWithPrompt() {
-    guard let password = promptForPassword(title: NSLocalizedString("VaultUnlockTitle", tableName: "StorageSettings", comment: "")) else {
-      return
+    let title = NSLocalizedString("VaultUnlockTitle", tableName: "StorageSettings", comment: "")
+    let defaultMessage = NSLocalizedString("VaultUnlockBody", tableName: "StorageSettings", comment: "")
+    let failedMessage = NSLocalizedString("VaultStatusUnlockFailed", tableName: "StorageSettings", comment: "")
+    var informativeText = defaultMessage
+
+    while true {
+      guard let password = promptForPassword(title: title, informativeText: informativeText) else {
+        return
+      }
+
+      if unlock(password: password) {
+        return
+      }
+
+      informativeText = "\(failedMessage)\n\n\(defaultMessage)"
     }
-    _ = unlock(password: password)
   }
 
   @discardableResult
@@ -1573,11 +1585,11 @@ class SyncEncryptionManager {
     return try AES.GCM.open(box, using: key)
   }
 
-  private func promptForPassword(title: String) -> String? {
+  private func promptForPassword(title: String, informativeText: String) -> String? {
     let alert = NSAlert()
     alert.alertStyle = .informational
     alert.messageText = title
-    alert.informativeText = NSLocalizedString("VaultUnlockBody", tableName: "StorageSettings", comment: "")
+    alert.informativeText = informativeText
 
     let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
     alert.accessoryView = field
@@ -1585,8 +1597,7 @@ class SyncEncryptionManager {
     alert.addButton(withTitle: NSLocalizedString("Cancel", comment: ""))
 
     guard alert.runModal() == .alertFirstButtonReturn else { return nil }
-    let value = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-    return value.isEmpty ? nil : value
+    return field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
   private func promptForNewPassword() -> String? {

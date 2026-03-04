@@ -104,9 +104,15 @@ private struct ShelfContentView: View {
   @Environment(AppState.self) private var appState
   @Environment(ModifierFlags.self) private var modifierFlags
   @Environment(\.scenePhase) private var scenePhase
+  @Default(.encryptionEnabled) private var encryptionEnabled
+  @State private var syncManager = SyncEncryptionManager.shared
 
   private var shelfItems: [HistoryItemDecorator] {
     appState.history.pinnedItems.filter(\.isVisible) + appState.history.unpinnedItems.filter(\.isVisible)
+  }
+
+  private var requiresAuthentication: Bool {
+    encryptionEnabled && syncManager.isLocked
   }
 
   private func defocusShelfSearch() {
@@ -122,17 +128,23 @@ private struct ShelfContentView: View {
 
   var body: some View {
     VStack(spacing: 10) {
-      ShelfTopStripView(
-        searchQuery: $searchQuery,
-        searchFocused: $searchFocused,
-        searchExpanded: $searchExpanded,
-        onOutsideSearchInteraction: defocusShelfSearch
-      )
+      if requiresAuthentication {
+        ShelfLockedStateView(statusText: syncManager.statusText) {
+          syncManager.unlockWithPrompt()
+        }
+      } else {
+        ShelfTopStripView(
+          searchQuery: $searchQuery,
+          searchFocused: $searchFocused,
+          searchExpanded: $searchExpanded,
+          onOutsideSearchInteraction: defocusShelfSearch
+        )
 
-      ShelfCarouselView(
-        items: shelfItems,
-        onOutsideSearchInteraction: defocusShelfSearch
-      )
+        ShelfCarouselView(
+          items: shelfItems,
+          onOutsideSearchInteraction: defocusShelfSearch
+        )
+      }
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 14)
@@ -140,8 +152,12 @@ private struct ShelfContentView: View {
       appState.shelfPreview.closeAll()
       searchFocused = false
       searchExpanded = false
-      appState.navigator.highlightShelfFirst()
-      appState.shelfPreview.updateLeadSelection()
+      if requiresAuthentication {
+        appState.navigator.select()
+      } else {
+        appState.navigator.highlightShelfFirst()
+        appState.shelfPreview.updateLeadSelection()
+      }
       appState.popup.needsResize = true
       DispatchQueue.main.async {
         if let window = NSApp.keyWindow {
@@ -154,7 +170,9 @@ private struct ShelfContentView: View {
         searchFocused = false
         searchExpanded = false
         appState.navigator.isKeyboardNavigating = true
-        if appState.navigator.leadHistoryItem == nil {
+        if requiresAuthentication {
+          appState.navigator.select()
+        } else if appState.navigator.leadHistoryItem == nil {
           appState.navigator.highlightShelfFirst()
         }
         DispatchQueue.main.async {
@@ -169,6 +187,15 @@ private struct ShelfContentView: View {
         modifierFlags.flags = []
         appState.navigator.isKeyboardNavigating = true
         appState.shelfPreview.closeAll()
+      }
+      appState.popup.needsResize = true
+    }
+    .onChange(of: requiresAuthentication) {
+      if requiresAuthentication {
+        appState.navigator.select()
+      } else {
+        appState.navigator.highlightShelfFirst()
+        appState.shelfPreview.updateLeadSelection()
       }
       appState.popup.needsResize = true
     }
@@ -188,6 +215,51 @@ private struct ShelfContentView: View {
         }
       }
     }
+  }
+}
+
+private struct ShelfLockedStateView: View {
+  let statusText: String
+  let unlockAction: () -> Void
+
+  private var headlineText: String {
+    let failedUnlockText = NSLocalizedString("VaultStatusUnlockFailed", tableName: "StorageSettings", comment: "")
+    return statusText == failedUnlockText
+      ? failedUnlockText
+      : NSLocalizedString("VaultLockedLabel", tableName: "StorageSettings", comment: "")
+  }
+
+  var body: some View {
+    VStack(spacing: 12) {
+      Image(systemName: "lock.fill")
+        .font(.system(size: 22, weight: .semibold))
+        .foregroundStyle(.secondary)
+
+      Text(headlineText)
+        .font(.headline)
+
+      Text("VaultUnlockBody", tableName: "StorageSettings")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+        .fixedSize(horizontal: false, vertical: true)
+
+      Button(action: unlockAction) {
+        Text("Unlock", tableName: "StorageSettings")
+          .frame(minWidth: 110)
+      }
+      .buttonStyle(.borderedProminent)
+    }
+    .frame(maxWidth: .infinity, minHeight: 248, alignment: .center)
+    .padding(.horizontal, 20)
+    .background(
+      RoundedRectangle(cornerRadius: 22, style: .continuous)
+        .fill(Color.white.opacity(0.08))
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 22, style: .continuous)
+        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+    )
   }
 }
 
