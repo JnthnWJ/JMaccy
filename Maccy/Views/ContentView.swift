@@ -829,13 +829,13 @@ private struct ShelfCarouselView: View {
             }
             .padding(.horizontal, 4)
             .padding(.vertical, 10)
+            .background {
+              ShelfWheelBridge()
+                .frame(width: 0, height: 0)
+            }
           }
           .frame(height: 248)
           .accessibilityIdentifier("shelf-carousel")
-          .background(alignment: .topLeading) {
-            ShelfWheelBridge()
-              .frame(width: 0, height: 0)
-          }
           .onAppear {
             if let selectedId = appState.navigator.leadSelection {
               proxy.scrollTo(selectedId, anchor: .center)
@@ -1205,33 +1205,39 @@ private struct ShelfWheelBridge: NSViewRepresentable {
         }
 
         let pointInScrollView = scrollView.convert(event.locationInWindow, from: nil)
-        guard scrollView.bounds.contains(pointInScrollView) else {
+        guard scrollView.bounds.contains(pointInScrollView) else { return event }
+
+        let horizontalDelta = event.hasPreciseScrollingDeltas
+          ? event.scrollingDeltaX
+          : event.deltaX
+
+        // Keep native horizontal scrolling gestures.
+        if abs(horizontalDelta) > 0.01 {
           return event
         }
 
-        // Keep native horizontal trackpad gestures.
-        if abs(event.scrollingDeltaX) > 0.01 {
-          return event
+        let deltaY = event.hasPreciseScrollingDeltas
+          ? event.scrollingDeltaY
+          : event.deltaY
+        guard abs(deltaY) > 0.01 else { return event }
+
+        if !event.hasPreciseScrollingDeltas {
+          if deltaY < 0 {
+            AppState.shared.navigator.highlightShelfNext()
+          } else {
+            AppState.shared.navigator.highlightShelfPrevious()
+          }
+          return nil
         }
 
-        let deltaY = event.scrollingDeltaY
-        guard abs(deltaY) > 0.01 else {
-          return event
-        }
-
-        let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 14
-        let translatedDeltaX = -deltaY * multiplier
+        let translatedDeltaX = -deltaY
         let visibleWidth = scrollView.contentView.bounds.width
         let maxX = max(0, documentView.bounds.width - visibleWidth)
-        guard maxX > 0 else {
-          return event
-        }
+        guard maxX > 0 else { return event }
 
         var origin = scrollView.contentView.bounds.origin
         let newX = min(max(origin.x + translatedDeltaX, 0), maxX)
-        guard newX != origin.x else {
-          return event
-        }
+        guard newX != origin.x else { return event }
 
         origin.x = newX
         scrollView.contentView.setBoundsOrigin(origin)
@@ -1248,7 +1254,28 @@ private struct ShelfWheelBridge: NSViewRepresentable {
         if let scrollView = candidate.enclosingScrollView {
           return scrollView
         }
+        if let nearbyScrollView = findDescendantScrollView(in: candidate) {
+          return nearbyScrollView
+        }
         current = candidate.superview
+      }
+
+      if let windowContentView = view.window?.contentView,
+         let windowScrollView = findDescendantScrollView(in: windowContentView) {
+        return windowScrollView
+      }
+
+      return nil
+    }
+
+    private func findDescendantScrollView(in view: NSView) -> NSScrollView? {
+      for subview in view.subviews {
+        if let scrollView = subview as? NSScrollView {
+          return scrollView
+        }
+        if let descendant = findDescendantScrollView(in: subview) {
+          return descendant
+        }
       }
       return nil
     }
