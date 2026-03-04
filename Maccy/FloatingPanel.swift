@@ -8,10 +8,13 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
   private var shelfBottomInset: CGFloat { 24 }
   private var shelfHorizontalInset: CGFloat { 8 }
   private var shelfMaxHeightRatio: CGFloat { 0.65 }
+  private let shelfFrameStabilizationDelays: [TimeInterval] = [0, 0.1, 0.25]
 
   var isPresented: Bool = false
   var statusBarButton: NSStatusBarButton?
   let onClose: () -> Void
+  private var screenParametersObserver: NSObjectProtocol?
+  private var pendingShelfFrameUpdates: [DispatchWorkItem] = []
 
   override var isMovable: Bool {
     get { !AppState.shared.shelfModeEnabled && Defaults[.popupPosition] != .statusItem }
@@ -68,10 +71,30 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
         })
     )
     contentView?.layer?.cornerRadius = Popup.cornerRadius + Popup.horizontalPadding
+
+    screenParametersObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.didChangeScreenParametersNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      guard let self, self.isPresented, AppState.shared.shelfModeEnabled else { return }
+      self.scheduleShelfFrameStabilization()
+    }
   }
 
-  private func shelfFrame(height: CGFloat) -> NSRect? {
-    guard let screenFrame = NSScreen.forPopup?.visibleFrame else {
+  deinit {
+    if let screenParametersObserver {
+      NotificationCenter.default.removeObserver(screenParametersObserver)
+    }
+    cancelPendingShelfFrameUpdates()
+  }
+
+  private func activeShelfScreen() -> NSScreen? {
+    screen ?? NSScreen.forPopup
+  }
+
+  private func shelfFrame(height: CGFloat, on screen: NSScreen? = nil) -> NSRect? {
+    guard let screenFrame = (screen ?? activeShelfScreen())?.visibleFrame else {
       return nil
     }
 
@@ -87,6 +110,42 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
     return NSRect(x: originX, y: originY, width: width, height: finalHeight)
   }
 
+  private func cancelPendingShelfFrameUpdates() {
+    pendingShelfFrameUpdates.forEach { $0.cancel() }
+    pendingShelfFrameUpdates.removeAll()
+  }
+
+  private func applyShelfFrame(height: CGFloat? = nil, animated: Bool = false) {
+    let frameHeight = height ?? frame.height
+    guard let newFrame = shelfFrame(height: frameHeight, on: activeShelfScreen()) else {
+      return
+    }
+
+    if animated {
+      animator().setFrame(newFrame, display: true)
+    } else {
+      setFrame(newFrame, display: true)
+    }
+  }
+
+  private func scheduleShelfFrameStabilization() {
+    cancelPendingShelfFrameUpdates()
+
+    for delay in shelfFrameStabilizationDelays {
+      let workItem = DispatchWorkItem { [weak self] in
+        guard let self, self.isPresented, AppState.shared.shelfModeEnabled else { return }
+        self.applyShelfFrame()
+      }
+      pendingShelfFrameUpdates.append(workItem)
+
+      if delay == 0 {
+        DispatchQueue.main.async(execute: workItem)
+      } else {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+      }
+    }
+  }
+
   func toggle(height: CGFloat, at popupPosition: PopupPosition = Defaults[.popupPosition]) {
     if isPresented {
       close()
@@ -99,10 +158,9 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
     if AppState.shared.shelfModeEnabled {
       styleMask.remove(.resizable)
       isMovableByWindowBackground = false
-      if let frame = shelfFrame(height: height) {
-        setFrame(frame, display: true)
-      }
+      applyShelfFrame(height: height)
     } else {
+      cancelPendingShelfFrameUpdates()
       styleMask.insert(.resizable)
       isMovableByWindowBackground = true
       let size = Defaults[.windowSize]
@@ -114,6 +172,10 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
     makeKey()
     isPresented = true
 
+    if AppState.shared.shelfModeEnabled {
+      scheduleShelfFrameStabilization()
+    }
+
     if popupPosition == .statusItem {
       DispatchQueue.main.async {
         self.statusBarButton?.isHighlighted = true
@@ -122,11 +184,12 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
   }
 
   func verticallyResize(to newHeight: CGFloat) {
-    if AppState.shared.shelfModeEnabled, let newFrame = shelfFrame(height: newHeight) {
+    if AppState.shared.shelfModeEnabled {
       NSAnimationContext.runAnimationGroup { context in
         context.duration = 0.2
-        animator().setFrame(newFrame, display: true)
+        applyShelfFrame(height: newHeight, animated: true)
       }
+      scheduleShelfFrameStabilization()
       return
     }
 
@@ -221,6 +284,11 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
     determinePreviewPlacement()
   }
 
+  func windowDidChangeScreen(_ notification: Notification) {
+    guard AppState.shared.shelfModeEnabled else { return }
+    scheduleShelfFrameStabilization()
+  }
+
   func windowWillStartLiveResize(_ notification: Notification) {
     guard !AppState.shared.shelfModeEnabled else { return }
     AppState.shared.preview.cancelAutoOpen()
@@ -256,6 +324,7 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate {
   }
 
   override func close() {
+    cancelPendingShelfFrameUpdates()
     super.close()
     AppState.shared.preview.state = .closed
     isPresented = false
