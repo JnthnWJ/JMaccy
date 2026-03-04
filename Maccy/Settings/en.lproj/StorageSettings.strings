@@ -21,7 +21,8 @@
 "TagsAlwaysSyncDescription" = "Tags are synced across devices, including empty tags.";
 "EnableEncryption" = "Encrypt history and sync data";
 "UnlockPolicy" = "Unlock policy:";
-"UnlockPolicySleepRestart" = "Lock after sleep/restart";
+"UnlockPolicySleepRestart" = "Lock after sleep and at Maccy startup";
+"UnlockPolicyStartup" = "Lock only at Maccy startup";
 "UnlockPolicyTimer" = "Timer-based lock";
 "UnlockPolicyStrict" = "Lock after every Maccy copy/paste action";
 "UnlockTimeout" = "Lock timeout:";

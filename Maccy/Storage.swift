@@ -562,8 +562,9 @@ class SyncEncryptionManager {
     }
   }
 
-  func handleSystemWillSleep() {
-    guard Defaults[.unlockPolicy] == .onSleepOrRestart else { return }
+  func handleSystemSleep() {
+    guard Defaults[.unlockPolicy].locksOnSleep else { return }
+    guard !isLocked else { return }
     lock(reason: .sleep)
   }
 

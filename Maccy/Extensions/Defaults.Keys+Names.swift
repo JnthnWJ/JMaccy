@@ -22,6 +22,7 @@ enum SyncScope: String, Codable, CaseIterable, Identifiable, Defaults.Serializab
 
 enum UnlockPolicy: String, Codable, CaseIterable, Identifiable, Defaults.Serializable {
   case onSleepOrRestart
+  case onStartup
   case timer
   case strictPerAction
 
@@ -31,11 +32,23 @@ enum UnlockPolicy: String, Codable, CaseIterable, Identifiable, Defaults.Seriali
     switch self {
     case .onSleepOrRestart:
       return NSLocalizedString("UnlockPolicySleepRestart", tableName: "StorageSettings", comment: "")
+    case .onStartup:
+      return NSLocalizedString(
+        "UnlockPolicyStartup",
+        tableName: "StorageSettings",
+        bundle: .main,
+        value: "Lock only at Maccy startup",
+        comment: ""
+      )
     case .timer:
       return NSLocalizedString("UnlockPolicyTimer", tableName: "StorageSettings", comment: "")
     case .strictPerAction:
       return NSLocalizedString("UnlockPolicyStrict", tableName: "StorageSettings", comment: "")
     }
+  }
+
+  var locksOnSleep: Bool {
+    self == .onSleepOrRestart
   }
 }
 

@@ -23,7 +23,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private var statusItemVisibilityObserver: NSKeyValueObservation?
-  private var willSleepObserver: NSObjectProtocol?
+  private var sleepObservers: [NSObjectProtocol] = []
 
   func applicationWillFinishLaunching(_ notification: Notification) { // swiftlint:disable:this function_body_length
     #if DEBUG
@@ -92,13 +92,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       }
     }
 
-    willSleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
-      forName: NSWorkspace.willSleepNotification,
-      object: nil,
-      queue: .main
-    ) { _ in
-      SyncEncryptionManager.shared.handleSystemWillSleep()
-    }
+    let notificationCenter = NSWorkspace.shared.notificationCenter
+    sleepObservers = [
+      notificationCenter.addObserver(
+        forName: NSWorkspace.willSleepNotification,
+        object: nil,
+        queue: .main
+      ) { _ in
+        Task { @MainActor in
+          SyncEncryptionManager.shared.handleSystemSleep()
+        }
+      },
+      notificationCenter.addObserver(
+        forName: NSWorkspace.screensDidSleepNotification,
+        object: nil,
+        queue: .main
+      ) { _ in
+        Task { @MainActor in
+          SyncEncryptionManager.shared.handleSystemSleep()
+        }
+      }
+    ]
   }
 
   func applicationDidFinishLaunching(_ aNotification: Notification) {

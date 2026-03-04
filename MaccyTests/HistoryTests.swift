@@ -861,3 +861,13 @@ final class SyncReliabilityTests: XCTestCase {
     return record
   }
 }
+
+final class SyncEncryptionManagerTests: XCTestCase {
+  func testStartupOnlyPolicyDoesNotLockOnSleep() {
+    XCTAssertFalse(UnlockPolicy.onStartup.locksOnSleep)
+  }
+
+  func testSleepAndStartupPolicyLocksOnSleep() {
+    XCTAssertTrue(UnlockPolicy.onSleepOrRestart.locksOnSleep)
+  }
+}
