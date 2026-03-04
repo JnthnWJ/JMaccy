@@ -1,5 +1,6 @@
 import Sauce
 import Defaults
+import Logging
 import SwiftUI
 
 struct KeyHandlingView<Content: View>: View {
@@ -10,6 +11,11 @@ struct KeyHandlingView<Content: View>: View {
 
   @Environment(AppState.self) private var appState
   @State private var keyEventMonitor: Any?
+  private let logger: Logger = {
+    var logger = Logger(label: "org.p0deje.Maccy.shelfPreview.debug")
+    logger.logLevel = .debug
+    return logger
+  }()
 
   var body: some View {
     content()
@@ -249,6 +255,9 @@ struct KeyHandlingView<Content: View>: View {
       appState.popup.close()
       return true
     case .togglePreview:
+      logger.debug(
+        "togglePreview key pressed shelfMode=\(shelfMode) selected=\(String(describing: appState.navigator.leadHistoryItem?.id)) searchFocused=\(searchFocused)"
+      )
       if shelfMode {
         appState.shelfPreview.toggle()
       } else {

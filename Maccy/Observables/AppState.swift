@@ -1,6 +1,7 @@
 import AppKit
 import Defaults
 import Foundation
+import Logging
 import Settings
 import SwiftUI
 import UniformTypeIdentifiers
@@ -139,6 +140,74 @@ enum ShelfPreviewLayoutMetrics {
   }
 }
 
+protocol ShelfPreviewAnchor: AnyObject {
+  func currentFrameInScreen() -> NSRect?
+}
+
+private final class WeakShelfPreviewAnchorBox {
+  private weak var base: AnyObject?
+
+  var anchor: (any ShelfPreviewAnchor)? {
+    base as? any ShelfPreviewAnchor
+  }
+
+  init(anchor: any ShelfPreviewAnchor) {
+    base = anchor
+  }
+}
+
+final class ShelfPreviewAnchorRegistry {
+  private var anchors: [UUID: WeakShelfPreviewAnchorBox] = [:]
+
+  func register(itemID: UUID, anchor: any ShelfPreviewAnchor) {
+    pruneReleasedAnchors()
+    anchors[itemID] = WeakShelfPreviewAnchorBox(anchor: anchor)
+  }
+
+  func unregister(itemID: UUID, anchor: any ShelfPreviewAnchor) {
+    pruneReleasedAnchors()
+
+    guard let currentAnchor = anchors[itemID]?.anchor else {
+      anchors.removeValue(forKey: itemID)
+      return
+    }
+
+    guard currentAnchor === anchor else {
+      return
+    }
+
+    anchors.removeValue(forKey: itemID)
+  }
+
+  func currentFrame(for itemID: UUID) -> NSRect? {
+    pruneReleasedAnchors()
+    return anchors[itemID]?.anchor?.currentFrameInScreen()
+  }
+
+  func retainOnly(_ itemIDs: Set<UUID>) {
+    pruneReleasedAnchors()
+
+    let staleItemIDs = anchors.keys.filter { !itemIDs.contains($0) }
+    for itemID in staleItemIDs {
+      anchors.removeValue(forKey: itemID)
+    }
+  }
+
+  func removeAll() {
+    anchors.removeAll()
+  }
+
+  private func pruneReleasedAnchors() {
+    let releasedItemIDs = anchors.compactMap { itemID, box in
+      box.anchor == nil ? itemID : nil
+    }
+
+    for itemID in releasedItemIDs {
+      anchors.removeValue(forKey: itemID)
+    }
+  }
+}
+
 @Observable
 class ShelfPreview {
   var isOpen = false
@@ -146,8 +215,13 @@ class ShelfPreview {
   var pointerX: CGFloat = 0
   var editingText = ""
 
-  @ObservationIgnored private var cardFrames: [UUID: NSRect] = [:]
-  @ObservationIgnored private var carouselViewportFrame: NSRect?
+  @ObservationIgnored private var logger: Logger = {
+    var logger = Logger(label: "org.p0deje.Maccy.shelfPreview.debug")
+    logger.logLevel = .debug
+    return logger
+  }()
+  @ObservationIgnored private let anchorRegistry = ShelfPreviewAnchorRegistry()
+  @ObservationIgnored private weak var carouselClipView: NSClipView?
   @ObservationIgnored private var currentItemID: UUID?
   @ObservationIgnored private var editingItemID: UUID?
 
@@ -156,6 +230,8 @@ class ShelfPreview {
 
   @ObservationIgnored private var imageEditSession: ShelfImageEditSession?
   @ObservationIgnored private var imageImportTask: Task<Void, Never>?
+  @ObservationIgnored private var pendingOpenTask: Task<Void, Never>?
+  @ObservationIgnored private var pendingOpenRequestID: UUID?
 
   var canShareSelection: Bool {
     guard let item = AppState.shared.navigator.leadHistoryItem else {
@@ -178,14 +254,9 @@ class ShelfPreview {
     }
   }
 
-  func updateCardFrame(itemID: UUID, frame: NSRect) {
-    if let current = cardFrames[itemID],
-       Self.rectsNearlyEqual(current, frame, tolerance: 0.25) {
-      return
-    }
-
-    cardFrames[itemID] = frame
-
+  func registerCardAnchor(itemID: UUID, anchor: any ShelfPreviewAnchor) {
+    anchorRegistry.register(itemID: itemID, anchor: anchor)
+    logger.debug("registerCardAnchor item=\(itemID) selected=\(String(describing: currentItemID)) isOpen=\(isOpen)")
     guard isOpen, currentItemID == itemID else {
       return
     }
@@ -193,9 +264,9 @@ class ShelfPreview {
     refreshPreviewPanel(animated: false)
   }
 
-  func removeCardFrame(itemID: UUID) {
-    cardFrames.removeValue(forKey: itemID)
-
+  func unregisterCardAnchor(itemID: UUID, anchor: any ShelfPreviewAnchor) {
+    anchorRegistry.unregister(itemID: itemID, anchor: anchor)
+    logger.debug("unregisterCardAnchor item=\(itemID) selected=\(String(describing: currentItemID)) isOpen=\(isOpen)")
     guard isOpen, currentItemID == itemID else {
       return
     }
@@ -203,12 +274,45 @@ class ShelfPreview {
     refreshPreviewPanel(animated: false)
   }
 
-  func updateCarouselViewportFrame(_ frame: NSRect?) {
-    if Self.rectsNearlyEqual(carouselViewportFrame, frame, tolerance: 0.25) {
+  func cardAnchorDidChange(itemID: UUID) {
+    guard isOpen, currentItemID == itemID else {
       return
     }
 
-    carouselViewportFrame = frame
+    logger.debug(
+      "cardAnchorDidChange item=\(itemID) frame=\(Self.describeRect(currentCardFrame(for: itemID))) viewport=\(Self.describeRect(currentCarouselViewportFrame()))"
+    )
+    refreshPreviewPanel(animated: false)
+  }
+
+  func bindCarouselClipView(_ clipView: NSClipView?) {
+    guard carouselClipView !== clipView else {
+      return
+    }
+
+    carouselClipView = clipView
+    logger.debug("bindCarouselClipView clipBound=\(clipView != nil)")
+    guard isOpen else {
+      return
+    }
+
+    refreshPreviewPanel(animated: false)
+  }
+
+  func carouselViewportDidChange() {
+    guard isOpen else {
+      return
+    }
+
+    logger.debug("carouselViewportDidChange viewport=\(Self.describeRect(currentCarouselViewportFrame()))")
+    refreshPreviewPanel(animated: false)
+  }
+
+  func syncVisibleShelfItemIDs(_ itemIDs: Set<UUID>) {
+    anchorRegistry.retainOnly(itemIDs)
+    logger.debug(
+      "syncVisibleShelfItemIDs visibleCount=\(itemIDs.count) selected=\(String(describing: currentItemID)) selectedStillVisible=\(currentItemID.map(itemIDs.contains) ?? false)"
+    )
 
     guard isOpen else {
       return
@@ -217,20 +321,21 @@ class ShelfPreview {
     refreshPreviewPanel(animated: false)
   }
 
-  func clearCarouselViewportFrame() {
-    updateCarouselViewportFrame(nil)
+  func currentCardFrame(for itemID: UUID) -> NSRect? {
+    anchorRegistry.currentFrame(for: itemID)
   }
 
   func selectedCardIsFullyVisible() -> Bool {
-    guard let currentItemID,
-          let frame = cardFrames[currentItemID] else {
+    guard let frame = currentSelectedCardFrame() else {
       return false
     }
-    return Self.isCardFullyVisible(frame: frame, in: carouselViewportFrame)
+
+    return Self.isCardFullyVisible(frame: frame, in: currentCarouselViewportFrame())
   }
 
   func updateLeadSelection() {
     let newSelection = AppState.shared.navigator.leadHistoryItem?.id
+    logger.debug("updateLeadSelection old=\(String(describing: currentItemID)) new=\(String(describing: newSelection)) isOpen=\(isOpen)")
     guard currentItemID != newSelection else {
       if isOpen {
         refreshPreviewPanel(animated: true)
@@ -238,6 +343,7 @@ class ShelfPreview {
       return
     }
 
+    cancelPendingOpen()
     currentItemID = newSelection
 
     if currentItemID == nil {
@@ -256,29 +362,40 @@ class ShelfPreview {
   }
 
   func open() {
+    logger.debug(
+      "open requested shelfMode=\(AppState.shared.shelfModeEnabled) selected=\(String(describing: AppState.shared.navigator.leadHistoryItem?.id)) isOpen=\(isOpen)"
+    )
     guard AppState.shared.shelfModeEnabled else {
+      logger.debug("open aborted because shelf mode is disabled")
       return
     }
 
-    guard AppState.shared.navigator.leadHistoryItem != nil else {
+    guard let item = AppState.shared.navigator.leadHistoryItem else {
+      logger.debug("open aborted because no lead history item is selected")
       return
     }
 
-    currentItemID = AppState.shared.navigator.leadHistoryItem?.id
-    guard selectedCardIsFullyVisible() else {
-      close()
+    cancelPendingOpen()
+    currentItemID = item.id
+
+    if renderPreviewPanel(for: item, animated: false) {
+      isOpen = true
+      logger.debug("open succeeded immediately item=\(item.id)")
       return
     }
 
-    isOpen = true
-    refreshPreviewPanel(animated: false)
+    logger.debug("open requires retry item=\(item.id)")
+    scheduleOpenRetry(for: item.id)
   }
 
   func close() {
+    cancelPendingOpen()
+
     guard isOpen else {
       return
     }
 
+    logger.debug("close preview panel selected=\(String(describing: currentItemID))")
     isOpen = false
 
     guard let panel = previewPanel, panel.isVisible else {
@@ -328,8 +445,11 @@ class ShelfPreview {
 
   @discardableResult
   func closePreviewIfOpen() -> Bool {
+    let hadPendingOpen = pendingOpenTask != nil
+    cancelPendingOpen()
+
     guard isOpen else {
-      return false
+      return hadPendingOpen
     }
 
     close()
@@ -337,12 +457,15 @@ class ShelfPreview {
   }
 
   func closeAll() {
+    cancelPendingOpen()
     closeEditor()
     close()
     imageEditSession?.stop()
     imageEditSession = nil
     imageImportTask?.cancel()
     imageImportTask = nil
+    anchorRegistry.removeAll()
+    carouselClipView = nil
   }
 
   func toggle() {
@@ -579,13 +702,34 @@ class ShelfPreview {
   private func refreshPreviewPanel(animated: Bool) {
     guard isOpen,
           let item = AppState.shared.navigator.leadHistoryItem else {
+      if isOpen {
+        logger.debug("refreshPreviewPanel skipped because lead history item is nil")
+      }
       return
     }
 
-    currentItemID = item.id
-    guard selectedCardIsFullyVisible() else {
+    guard renderPreviewPanel(for: item, animated: animated) else {
+      logger.debug("refreshPreviewPanel failed render for item=\(item.id); closing")
       close()
       return
+    }
+  }
+
+  @discardableResult
+  private func renderPreviewPanel(for item: HistoryItemDecorator, animated: Bool) -> Bool {
+    currentItemID = item.id
+
+    guard let selectedCardFrame = currentCardFrame(for: item.id) else {
+      logger.debug("renderPreviewPanel missing selected card frame item=\(item.id)")
+      return false
+    }
+
+    let carouselViewportFrame = currentCarouselViewportFrame()
+    guard Self.isCardFullyVisible(frame: selectedCardFrame, in: carouselViewportFrame) else {
+      logger.debug(
+        "renderPreviewPanel selected card not fully visible item=\(item.id) card=\(Self.describeRect(selectedCardFrame)) viewport=\(Self.describeRect(carouselViewportFrame))"
+      )
+      return false
     }
 
     let referenceScreen = AppState.shared.appDelegate?.panel.screen?.visibleFrame
@@ -594,14 +738,16 @@ class ShelfPreview {
     let placement = Self.computePreviewPlacement(
       preferredSize: preferredPreviewSize(for: item, screenFrame: referenceScreen),
       minimumSize: minimumPreviewSize(for: item, screenFrame: referenceScreen),
-      selectedCardFrame: cardFrames[item.id],
+      selectedCardFrame: selectedCardFrame,
       carouselViewportFrame: carouselViewportFrame,
       screenFrame: referenceScreen
     )
 
     guard placement.isValid else {
-      close()
-      return
+      logger.debug(
+        "renderPreviewPanel invalid placement item=\(item.id) card=\(Self.describeRect(selectedCardFrame)) viewport=\(Self.describeRect(carouselViewportFrame)) screen=\(Self.describeRect(referenceScreen))"
+      )
+      return false
     }
 
     pointerX = placement.pointerX
@@ -621,7 +767,8 @@ class ShelfPreview {
       } else {
         panel.setFrame(finalFrame, display: true)
       }
-      return
+      logger.debug("renderPreviewPanel updated existing panel item=\(item.id) frame=\(Self.describeRect(finalFrame))")
+      return true
     }
 
     let startFrame = scaledFrame(from: finalFrame, scale: 0.97, yOffset: -10)
@@ -635,6 +782,90 @@ class ShelfPreview {
       panel.animator().setFrame(finalFrame, display: true)
       panel.animator().alphaValue = 1
     }
+
+    logger.debug("renderPreviewPanel opened panel item=\(item.id) frame=\(Self.describeRect(finalFrame))")
+    return true
+  }
+
+  private func cancelPendingOpen() {
+    if let pendingOpenRequestID {
+      logger.debug("cancelPendingOpen requestID=\(pendingOpenRequestID)")
+    }
+    pendingOpenTask?.cancel()
+    pendingOpenTask = nil
+    pendingOpenRequestID = nil
+  }
+
+  private func scheduleOpenRetry(for itemID: UUID) {
+    let requestID = UUID()
+    pendingOpenRequestID = requestID
+    logger.debug("scheduleOpenRetry requestID=\(requestID) item=\(itemID)")
+    pendingOpenTask = Task { @MainActor [weak self] in
+      for attempt in 1...20 {
+        try? await Task.sleep(for: .milliseconds(16))
+        guard !Task.isCancelled,
+              let self,
+              AppState.shared.shelfModeEnabled,
+              let item = AppState.shared.navigator.leadHistoryItem,
+              item.id == itemID,
+              self.currentItemID == itemID else {
+          self?.logger.debug("openRetry aborted requestID=\(requestID) attempt=\(attempt)")
+          self?.clearPendingOpen(ifMatches: requestID)
+          return
+        }
+
+        if self.renderPreviewPanel(for: item, animated: false) {
+          self.isOpen = true
+          self.logger.debug("openRetry succeeded requestID=\(requestID) attempt=\(attempt) item=\(itemID)")
+          self.clearPendingOpen(ifMatches: requestID)
+          return
+        }
+
+        self.logger.debug(
+          "openRetry waiting requestID=\(requestID) attempt=\(attempt) item=\(itemID) frame=\(Self.describeRect(self.currentCardFrame(for: itemID))) viewport=\(Self.describeRect(self.currentCarouselViewportFrame()))"
+        )
+      }
+
+      self?.logger.debug("openRetry exhausted requestID=\(requestID) item=\(itemID)")
+      self?.clearPendingOpen(ifMatches: requestID)
+    }
+  }
+
+  private func clearPendingOpen(ifMatches requestID: UUID) {
+    guard pendingOpenRequestID == requestID else {
+      return
+    }
+
+    logger.debug("clearPendingOpen requestID=\(requestID)")
+    pendingOpenTask = nil
+    pendingOpenRequestID = nil
+  }
+
+  private func currentSelectedCardFrame() -> NSRect? {
+    guard let currentItemID else {
+      return nil
+    }
+
+    return currentCardFrame(for: currentItemID)
+  }
+
+  private func currentCarouselViewportFrame() -> NSRect? {
+    guard let carouselClipView,
+          let window = carouselClipView.window else {
+      return nil
+    }
+
+    let viewportInWindow = carouselClipView.convert(carouselClipView.bounds, to: nil)
+    return window.convertToScreen(viewportInWindow)
+  }
+
+  private static func describeRect(_ rect: NSRect?) -> String {
+    guard let rect else {
+      return "nil"
+    }
+
+    let normalized = rect.standardized
+    return "x=\(Int(normalized.minX.rounded())) y=\(Int(normalized.minY.rounded())) w=\(Int(normalized.width.rounded())) h=\(Int(normalized.height.rounded()))"
   }
 
   private func preferredPreviewSize(for item: HistoryItemDecorator, screenFrame: NSRect) -> NSSize {
@@ -826,24 +1057,6 @@ class ShelfPreview {
     let epsilon: CGFloat = 0.5
     let adjustedCard = normalizedCard.insetBy(dx: epsilon, dy: epsilon)
     return normalizedViewport.contains(adjustedCard)
-  }
-
-  private static func rectsNearlyEqual(_ lhs: NSRect, _ rhs: NSRect, tolerance: CGFloat) -> Bool {
-    abs(lhs.origin.x - rhs.origin.x) < tolerance
-      && abs(lhs.origin.y - rhs.origin.y) < tolerance
-      && abs(lhs.size.width - rhs.size.width) < tolerance
-      && abs(lhs.size.height - rhs.size.height) < tolerance
-  }
-
-  private static func rectsNearlyEqual(_ lhs: NSRect?, _ rhs: NSRect?, tolerance: CGFloat) -> Bool {
-    switch (lhs, rhs) {
-    case (nil, nil):
-      true
-    case let (lhsRect?, rhsRect?):
-      rectsNearlyEqual(lhsRect, rhsRect, tolerance: tolerance)
-    default:
-      false
-    }
   }
 }
 

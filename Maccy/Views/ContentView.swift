@@ -1,4 +1,5 @@
 import Defaults
+import Logging
 import SwiftData
 import SwiftUI
 
@@ -841,6 +842,14 @@ private struct ShelfCarouselView: View {
               proxy.scrollTo(selectedId, anchor: .center)
             }
           }
+          .task(id: items.map(\.id)) {
+            var logger = Logger(label: "org.p0deje.Maccy.shelfPreview.debug")
+            logger.logLevel = .debug
+            logger.debug(
+              "shelf items changed count=\(items.count) selected=\(String(describing: appState.navigator.leadSelection))"
+            )
+            appState.shelfPreview.syncVisibleShelfItemIDs(Set(items.map(\.id)))
+          }
           .task(id: appState.navigator.leadSelection) {
             guard let selectedId = appState.navigator.leadSelection else {
               pendingSelectionSource = .keyboardOrProgrammatic
@@ -1002,69 +1011,101 @@ private struct ShelfCardView: View {
     .onAppear {
       item.ensureThumbnailImage()
     }
-    .onDisappear {
-      appState.shelfPreview.removeCardFrame(itemID: item.id)
-    }
   }
 }
 
 private struct ShelfCardFrameReporter: NSViewRepresentable {
   let itemID: UUID
   @Environment(AppState.self) private var appState
+  private let logger: Logger = {
+    var logger = Logger(label: "org.p0deje.Maccy.shelfPreview.debug")
+    logger.logLevel = .debug
+    return logger
+  }()
 
   func makeNSView(context: Context) -> ReporterView {
     let view = ReporterView()
     view.itemID = itemID
     view.appState = appState
+    logger.debug("reporter makeNSView item=\(itemID)")
+    appState.shelfPreview.registerCardAnchor(itemID: itemID, anchor: view)
     return view
   }
 
   func updateNSView(_ nsView: ReporterView, context: Context) {
+    if let previousItemID = nsView.itemID,
+       previousItemID != itemID {
+      logger.debug("reporter updateNSView rebind old=\(previousItemID) new=\(itemID)")
+      (nsView.appState ?? appState)?.shelfPreview.unregisterCardAnchor(itemID: previousItemID, anchor: nsView)
+    }
     nsView.itemID = itemID
     nsView.appState = appState
-    nsView.reportFrame()
+    logger.debug("reporter updateNSView register item=\(itemID)")
+    appState.shelfPreview.registerCardAnchor(itemID: itemID, anchor: nsView)
+    nsView.notifyAnchorDidChange()
   }
 
   static func dismantleNSView(_ nsView: ReporterView, coordinator: ()) {
-    nsView.teardown()
+    var logger = Logger(label: "org.p0deje.Maccy.shelfPreview.debug")
+    logger.logLevel = .debug
     if let itemID = nsView.itemID {
-      AppState.shared.shelfPreview.removeCardFrame(itemID: itemID)
+      logger.debug("reporter dismantle item=\(itemID)")
+      (nsView.appState ?? AppState.shared).shelfPreview.unregisterCardAnchor(itemID: itemID, anchor: nsView)
     }
+    nsView.teardown()
   }
 
-  final class ReporterView: NSView {
+  final class ReporterView: NSView, ShelfPreviewAnchor {
+    private let logger: Logger = {
+      var logger = Logger(label: "org.p0deje.Maccy.shelfPreview.debug")
+      logger.logLevel = .debug
+      return logger
+    }()
     weak var appState: AppState?
     var itemID: UUID?
     private weak var observedClipView: NSClipView?
+    private weak var observedWindow: NSWindow?
     private var clipBoundsObserver: NSObjectProtocol?
+    private var frameObserver: NSObjectProtocol?
+    private var windowMoveObserver: NSObjectProtocol?
+    private var windowResizeObserver: NSObjectProtocol?
 
     deinit {
-      stopObservingClipBounds()
+      teardown()
     }
 
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()
+      logger.debug("reporter viewDidMoveToWindow item=\(String(describing: itemID)) hasWindow=\(window != nil)")
       configureClipObservation()
-      reportFrame()
+      configureFrameObservation()
+      configureWindowObservation()
+      notifyAnchorDidChange()
     }
 
     override func viewDidMoveToSuperview() {
       super.viewDidMoveToSuperview()
+      logger.debug("reporter viewDidMoveToSuperview item=\(String(describing: itemID))")
       configureClipObservation()
-      reportFrame()
+      configureFrameObservation()
+      configureWindowObservation()
+      notifyAnchorDidChange()
     }
 
     override func layout() {
       super.layout()
-      reportFrame()
+      notifyAnchorDidChange()
     }
 
     func teardown() {
       stopObservingClipBounds()
+      stopObservingFrameChanges()
+      stopObservingWindowChanges()
     }
 
     private func configureClipObservation() {
       guard let clipView = enclosingScrollView?.contentView else {
+        logger.debug("reporter clip observation unavailable item=\(String(describing: itemID))")
         stopObservingClipBounds()
         return
       }
@@ -1076,12 +1117,13 @@ private struct ShelfCardFrameReporter: NSViewRepresentable {
       stopObservingClipBounds()
       observedClipView = clipView
       clipView.postsBoundsChangedNotifications = true
+      logger.debug("reporter observing clip bounds item=\(String(describing: itemID))")
       clipBoundsObserver = NotificationCenter.default.addObserver(
         forName: NSView.boundsDidChangeNotification,
         object: clipView,
         queue: .main
       ) { [weak self] _ in
-        self?.reportFrame()
+        self?.notifyAnchorDidChange()
       }
     }
 
@@ -1093,16 +1135,103 @@ private struct ShelfCardFrameReporter: NSViewRepresentable {
       observedClipView = nil
     }
 
-    func reportFrame() {
-      guard let appState,
-            let itemID,
-            let window else {
+    private func configureFrameObservation() {
+      guard frameObserver == nil else {
         return
+      }
+
+      postsFrameChangedNotifications = true
+      frameObserver = NotificationCenter.default.addObserver(
+        forName: NSView.frameDidChangeNotification,
+        object: self,
+        queue: .main
+      ) { [weak self] _ in
+        self?.notifyAnchorDidChange()
+      }
+    }
+
+    private func stopObservingFrameChanges() {
+      if let frameObserver {
+        NotificationCenter.default.removeObserver(frameObserver)
+        self.frameObserver = nil
+      }
+    }
+
+    private func configureWindowObservation() {
+      guard let window else {
+        logger.debug("reporter window observation unavailable item=\(String(describing: itemID))")
+        stopObservingWindowChanges()
+        return
+      }
+
+      guard observedWindow !== window else {
+        return
+      }
+
+      stopObservingWindowChanges()
+      observedWindow = window
+      logger.debug("reporter observing window movement item=\(String(describing: itemID))")
+      windowMoveObserver = NotificationCenter.default.addObserver(
+        forName: NSWindow.didMoveNotification,
+        object: window,
+        queue: .main
+      ) { [weak self] _ in
+        self?.notifyAnchorDidChange()
+      }
+      windowResizeObserver = NotificationCenter.default.addObserver(
+        forName: NSWindow.didResizeNotification,
+        object: window,
+        queue: .main
+      ) { [weak self] _ in
+        self?.notifyAnchorDidChange()
+      }
+    }
+
+    private func stopObservingWindowChanges() {
+      if let windowMoveObserver {
+        NotificationCenter.default.removeObserver(windowMoveObserver)
+        self.windowMoveObserver = nil
+      }
+      if let windowResizeObserver {
+        NotificationCenter.default.removeObserver(windowResizeObserver)
+        self.windowResizeObserver = nil
+      }
+      observedWindow = nil
+    }
+
+    func currentFrameInScreen() -> NSRect? {
+      guard let window else {
+        if itemID == appState?.navigator.leadHistoryItem?.id {
+          logger.debug("reporter frame lookup has no window for selected item=\(String(describing: itemID))")
+        }
+        return nil
       }
 
       let frameInWindow = convert(bounds, to: nil)
       let frameInScreen = window.convertToScreen(frameInWindow)
-      appState.shelfPreview.updateCardFrame(itemID: itemID, frame: frameInScreen)
+      if itemID == appState?.navigator.leadHistoryItem?.id {
+        logger.debug(
+          "reporter frame lookup for selected item=\(String(describing: itemID)) frame=\(Self.describeRect(frameInScreen))"
+        )
+      }
+      return frameInScreen
+    }
+
+    func notifyAnchorDidChange() {
+      guard let appState,
+            let itemID else {
+        return
+      }
+
+      if itemID == appState.navigator.leadHistoryItem?.id {
+        logger.debug("reporter notifyAnchorDidChange selected item=\(itemID)")
+      }
+      appState.shelfPreview.cardAnchorDidChange(itemID: itemID)
+    }
+
+    private static func describeRect(_ rect: NSRect) -> String {
+      let normalized = rect.standardized
+      return "x=\(Int(normalized.minX.rounded())) y=\(Int(normalized.minY.rounded())) w=\(Int(normalized.width.rounded())) h=\(Int(normalized.height.rounded()))"
     }
   }
 }
@@ -1144,9 +1273,17 @@ private struct ShelfWheelBridge: NSViewRepresentable {
   }
 
   final class Coordinator {
+    private let logger: Logger = {
+      var logger = Logger(label: "org.p0deje.Maccy.shelfPreview.debug")
+      logger.logLevel = .debug
+      return logger
+    }()
     private weak var scrollView: NSScrollView?
+    private weak var observedWindow: NSWindow?
     private var monitor: Any?
     private var clipBoundsObserver: NSObjectProtocol?
+    private var windowMoveObserver: NSObjectProtocol?
+    private var windowResizeObserver: NSObjectProtocol?
 
     deinit {
       detach()
@@ -1154,6 +1291,7 @@ private struct ShelfWheelBridge: NSViewRepresentable {
 
     func attach(to view: NSView) {
       guard let scrollView = findScrollView(from: view) else { return }
+      logger.debug("wheel attach hasWindow=\(scrollView.window != nil)")
 
       if self.scrollView !== scrollView {
         stopObservingClipBounds()
@@ -1163,29 +1301,34 @@ private struct ShelfWheelBridge: NSViewRepresentable {
         observeClipBounds(of: scrollView)
       }
 
+      AppState.shared.shelfPreview.bindCarouselClipView(scrollView.contentView)
+      configureWindowObservation(window: scrollView.window)
       installMonitor()
-      updateViewportFrame()
+      notifyViewportDidChange()
     }
 
     func detach() {
+      logger.debug("wheel detach")
       if let monitor {
         NSEvent.removeMonitor(monitor)
         self.monitor = nil
       }
       stopObservingClipBounds()
-      AppState.shared.shelfPreview.clearCarouselViewportFrame()
+      stopObservingWindow()
+      AppState.shared.shelfPreview.bindCarouselClipView(nil)
       scrollView = nil
     }
 
     private func observeClipBounds(of scrollView: NSScrollView) {
       let clipView = scrollView.contentView
       clipView.postsBoundsChangedNotifications = true
+      logger.debug("wheel observing clip bounds")
       clipBoundsObserver = NotificationCenter.default.addObserver(
         forName: NSView.boundsDidChangeNotification,
         object: clipView,
         queue: .main
       ) { [weak self] _ in
-        self?.updateViewportFrame()
+        self?.notifyViewportDidChange()
       }
     }
 
@@ -1196,16 +1339,51 @@ private struct ShelfWheelBridge: NSViewRepresentable {
       }
     }
 
-    private func updateViewportFrame() {
-      guard let scrollView,
-            let window = scrollView.window else {
+    private func configureWindowObservation(window: NSWindow?) {
+      guard let window else {
+        logger.debug("wheel window observation unavailable")
+        stopObservingWindow()
         return
       }
 
-      let clipView = scrollView.contentView
-      let viewportInWindow = clipView.convert(clipView.bounds, to: nil)
-      let viewportInScreen = window.convertToScreen(viewportInWindow)
-      AppState.shared.shelfPreview.updateCarouselViewportFrame(viewportInScreen)
+      guard observedWindow !== window else {
+        return
+      }
+
+      stopObservingWindow()
+      observedWindow = window
+      logger.debug("wheel observing window movement")
+      windowMoveObserver = NotificationCenter.default.addObserver(
+        forName: NSWindow.didMoveNotification,
+        object: window,
+        queue: .main
+      ) { [weak self] _ in
+        self?.notifyViewportDidChange()
+      }
+      windowResizeObserver = NotificationCenter.default.addObserver(
+        forName: NSWindow.didResizeNotification,
+        object: window,
+        queue: .main
+      ) { [weak self] _ in
+        self?.notifyViewportDidChange()
+      }
+    }
+
+    private func stopObservingWindow() {
+      if let windowMoveObserver {
+        NotificationCenter.default.removeObserver(windowMoveObserver)
+        self.windowMoveObserver = nil
+      }
+      if let windowResizeObserver {
+        NotificationCenter.default.removeObserver(windowResizeObserver)
+        self.windowResizeObserver = nil
+      }
+      observedWindow = nil
+    }
+
+    private func notifyViewportDidChange() {
+      logger.debug("wheel viewport changed")
+      AppState.shared.shelfPreview.carouselViewportDidChange()
     }
 
     private func installMonitor() {
@@ -1261,7 +1439,7 @@ private struct ShelfWheelBridge: NSViewRepresentable {
         origin.x = newX
         scrollView.contentView.setBoundsOrigin(origin)
         scrollView.reflectScrolledClipView(scrollView.contentView)
-        self.updateViewportFrame()
+        self.notifyViewportDidChange()
 
         return nil
       }

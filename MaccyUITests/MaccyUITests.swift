@@ -352,6 +352,40 @@ class MaccyUITests: XCTestCase {
     assertNotExists(app.descendants(matching: .any)["shelf-preview-popup"])
   }
 
+  func testShelfPreviewUsesFreshCardFramesAfterNewCopy() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    _ = seedShelfCopies(count: 4)
+    popUpWithMouse()
+    app.typeKey(.escape, modifierFlags: [])
+
+    let newestValue = "shelf-new-\(UUID().uuidString.prefix(8))"
+    copyToClipboard(newestValue)
+    popUpWithMouse()
+
+    app.typeKey(.space, modifierFlags: [])
+
+    let preview = app.descendants(matching: .any)["shelf-preview-popup"]
+    assertExists(preview)
+
+    let pointerTip = app.descendants(matching: .any)["shelf-preview-pointer-tip"]
+    assertExists(pointerTip)
+
+    let selectedCard = shelfCards.element(boundBy: 0)
+    assertExists(selectedCard)
+
+    XCTAssertLessThanOrEqual(
+      abs(pointerTip.frame.midX - selectedCard.frame.midX),
+      14,
+      "Preview pointer should align with the newest selected card after reopening the shelf."
+    )
+    XCTAssertLessThanOrEqual(
+      abs(pointerTip.frame.midY - selectedCard.frame.maxY),
+      8,
+      "Preview pointer should visually touch the selected card after reopening the shelf."
+    )
+  }
+
   func testShelfPreviewPointerTouchesSelectedCardTop() throws {
     try skipIfShelfUnavailable()
     setPopupLayoutMode("shelf")

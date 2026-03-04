@@ -1862,9 +1862,12 @@ class Storage {
 
   func activateEncryptedRuntime() {
     let inMemory = ModelConfiguration(nil, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
-    if let container = try? ModelContainer(for: HistoryItem.self, HistoryTag.self, configurations: inMemory) {
-      runtimeContainer = container
+    guard let container = try? ModelContainer(for: HistoryItem.self, HistoryTag.self, configurations: inMemory) else {
+      return
     }
+
+    History.shared.discardRuntimeReferences()
+    runtimeContainer = container
   }
 
   func activatePlainRuntime() {
@@ -1872,6 +1875,7 @@ class Storage {
   }
 
   func clearRuntimeHistory() {
+    History.shared.discardRuntimeReferences()
     try? context.delete(model: HistoryItem.self)
     try? context.delete(model: HistoryTag.self)
     context.processPendingChanges()

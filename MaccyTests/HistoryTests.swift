@@ -49,6 +49,29 @@ class HistoryTests: XCTestCase {
     XCTAssertEqual(history.items, [second, first])
   }
 
+  func testActivatingEncryptedRuntimeClearsTransientStateBoundToOldContext() {
+    defer {
+      Storage.shared.activatePlainRuntime()
+    }
+
+    let item = history.add(historyItem("foo"))
+    let tag = history.createTag(name: "Work", color: .blue)
+
+    history.selectTag(tag?.id)
+    history.pasteStack = PasteStack(items: [item], modifierFlags: [])
+    AppState.shared.navigator.select(item: item)
+
+    Storage.shared.activateEncryptedRuntime()
+
+    XCTAssertTrue(history.items.isEmpty)
+    XCTAssertTrue(history.all.isEmpty)
+    XCTAssertTrue(history.tags.isEmpty)
+    XCTAssertNil(history.selectedTagID)
+    XCTAssertNil(history.pasteStack)
+    XCTAssertTrue(AppState.shared.navigator.selection.isEmpty)
+    XCTAssertNil(AppState.shared.navigator.leadHistoryItem)
+  }
+
   func testAddingSame() {
     let first = historyItem("foo")
     first.title = "xyz"
@@ -457,6 +480,64 @@ class HistoryTests: XCTestCase {
 
   private func waitForSearchThrottle() {
     RunLoop.main.run(until: Date().addingTimeInterval(0.35))
+  }
+}
+
+private final class FakeShelfPreviewAnchor: ShelfPreviewAnchor {
+  var frame: NSRect?
+
+  init(frame: NSRect?) {
+    self.frame = frame
+  }
+
+  func currentFrameInScreen() -> NSRect? {
+    return frame
+  }
+}
+
+@MainActor
+final class ShelfPreviewAnchorRegistryTests: XCTestCase {
+
+  func testCurrentFrameReflectsLiveAnchorChanges() {
+    let registry = ShelfPreviewAnchorRegistry()
+    let itemID = UUID()
+    let anchor = FakeShelfPreviewAnchor(frame: NSRect(x: 10, y: 20, width: 30, height: 40))
+
+    registry.register(itemID: itemID, anchor: anchor)
+    XCTAssertEqual(registry.currentFrame(for: itemID), anchor.frame)
+
+    anchor.frame = NSRect(x: 50, y: 60, width: 70, height: 80)
+    XCTAssertEqual(registry.currentFrame(for: itemID), anchor.frame)
+  }
+
+  func testCurrentFrameDoesNotFallbackToAnotherItemAfterUnregister() {
+    let registry = ShelfPreviewAnchorRegistry()
+    let firstItemID = UUID()
+    let secondItemID = UUID()
+    let firstAnchor = FakeShelfPreviewAnchor(frame: NSRect(x: 10, y: 20, width: 30, height: 40))
+    let secondAnchor = FakeShelfPreviewAnchor(frame: NSRect(x: 110, y: 120, width: 130, height: 140))
+
+    registry.register(itemID: firstItemID, anchor: firstAnchor)
+    registry.register(itemID: secondItemID, anchor: secondAnchor)
+    registry.unregister(itemID: firstItemID, anchor: firstAnchor)
+
+    XCTAssertNil(registry.currentFrame(for: firstItemID))
+    XCTAssertEqual(registry.currentFrame(for: secondItemID), secondAnchor.frame)
+  }
+
+  func testSyncVisibleShelfItemIDsPrunesRemovedAnchors() {
+    let preview = ShelfPreview()
+    let visibleItemID = UUID()
+    let removedItemID = UUID()
+    let visibleAnchor = FakeShelfPreviewAnchor(frame: NSRect(x: 10, y: 20, width: 30, height: 40))
+    let removedAnchor = FakeShelfPreviewAnchor(frame: NSRect(x: 110, y: 120, width: 130, height: 140))
+
+    preview.registerCardAnchor(itemID: visibleItemID, anchor: visibleAnchor)
+    preview.registerCardAnchor(itemID: removedItemID, anchor: removedAnchor)
+    preview.syncVisibleShelfItemIDs([visibleItemID])
+
+    XCTAssertEqual(preview.currentCardFrame(for: visibleItemID), visibleAnchor.frame)
+    XCTAssertNil(preview.currentCardFrame(for: removedItemID))
   }
 }
 

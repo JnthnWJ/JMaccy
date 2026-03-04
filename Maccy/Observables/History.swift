@@ -137,6 +137,24 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   }
 
   @MainActor
+  func discardRuntimeReferences() {
+    AppState.shared.navigator.selectWithoutScrolling(item: nil, footerItem: nil)
+    pasteStack = nil
+
+    all.forEach(cleanup)
+    all.removeAll()
+    items.removeAll()
+    sessionLog.removeAll()
+    tags.removeAll()
+
+    if selectedTagID != nil {
+      selectedTagID = nil
+    }
+
+    AppState.shared.popup.needsResize = true
+  }
+
+  @MainActor
   private func limitHistorySize(to maxSize: Int) {
     let unpinned = all.filter(\.isUnpinned)
     if unpinned.count >= maxSize {
