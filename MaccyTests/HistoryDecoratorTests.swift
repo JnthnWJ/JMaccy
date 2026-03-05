@@ -70,6 +70,20 @@ class HistoryItemDecoratorTests: XCTestCase {
     XCTAssertEqual(itemDecorator.thumbnailImage!.size, image.size)
   }
 
+  func testShelfDisplayTitleUsesTypeWhenItemIsNotRenamed() {
+    let itemDecorator = historyItemDecorator("foo")
+    XCTAssertEqual(itemDecorator.shelfDisplayTitle, NSLocalizedString("shelf_type_text", comment: ""))
+  }
+
+  func testShelfDisplayTitleUsesCustomTitleWhenRenamed() {
+    let itemDecorator = historyItemDecorator("foo")
+    itemDecorator.item.customTitle = "Snippet"
+    itemDecorator.item.title = "Snippet"
+    itemDecorator.title = "Snippet"
+
+    XCTAssertEqual(itemDecorator.shelfDisplayTitle, "Snippet")
+  }
+
   func testImageCopyableTextUsesOCRTitle() {
     let image = NSImage(named: "StatusBarMenuImage")!
     let itemDecorator = historyItemDecorator(image)

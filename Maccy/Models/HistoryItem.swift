@@ -69,6 +69,7 @@ class HistoryItem {
   var pin: String?
   var tag: HistoryTag?
   var title = ""
+  var customTitle: String?
 
   @Relationship(deleteRule: .cascade, inverse: \HistoryItemContent.item)
   var contents: [HistoryItemContent] = []

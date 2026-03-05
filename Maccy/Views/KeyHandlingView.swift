@@ -40,7 +40,7 @@ struct KeyHandlingView<Content: View>: View {
     let firstResponder = NSApp.keyWindow?.firstResponder
 
     // Let native text editing handle key events while any text input is active.
-    if firstResponder is NSTextView {
+    if firstResponder is NSTextView, keyChord != .renameCurrentItem {
       return false
     }
 
@@ -265,9 +265,15 @@ struct KeyHandlingView<Content: View>: View {
       }
       return true
     case .renameCurrentItem:
-      guard shelfMode,
-            let selectedItem = appState.navigator.leadHistoryItem else {
+      guard shelfMode else {
         return false
+      }
+      let selectedItem = appState.navigator.leadHistoryItem ?? appState.history.firstVisibleItem
+      guard let selectedItem else {
+        return false
+      }
+      if appState.navigator.leadHistoryItem == nil {
+        appState.navigator.select(item: selectedItem)
       }
       appState.history.promptRenameItem(selectedItem)
       return true

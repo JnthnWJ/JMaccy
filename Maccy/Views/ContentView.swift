@@ -891,7 +891,7 @@ private struct ShelfCardView: View {
   var body: some View {
     let hasImage = item.hasImage
     let thumbnailImage = item.thumbnailImage
-    let cardTitle = item.title.isEmpty ? item.text.shortened(to: 80) : item.title.shortened(to: 80)
+    let cardTitle = item.shelfDisplayTitle.shortened(to: 80)
     let cardBodyText = item.shelfExcerpt.isEmpty ? cardTitle : item.shelfExcerpt
     let shelfContentBackgroundColor = item.shelfContentBackgroundColor
     let shelfContentForegroundColor = item.shelfContentForegroundColor
@@ -906,13 +906,7 @@ private struct ShelfCardView: View {
       VStack(spacing: 0) {
         HStack(alignment: .top, spacing: 8) {
           VStack(alignment: .leading, spacing: 2) {
-            Group {
-              if let shelfNamedColorName = item.shelfNamedColorName {
-                Text(verbatim: shelfNamedColorName)
-              } else {
-                Text(LocalizedStringKey(item.shelfTypeKey))
-              }
-            }
+            Text(verbatim: cardTitle)
               .font(.headline)
               .lineLimit(1)
             Text(item.shelfRelativeTime)

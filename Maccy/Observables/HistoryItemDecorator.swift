@@ -47,6 +47,22 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
 
   var title: String = ""
   var attributedTitle: AttributedString?
+  var hasCustomTitle: Bool {
+    guard let customTitle = item.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+      return false
+    }
+    return !customTitle.isEmpty
+  }
+  var shelfDisplayTitle: String {
+    if let customTitle = item.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !customTitle.isEmpty {
+      return customTitle
+    }
+    if let colorName = shelfNamedColorName {
+      return colorName
+    }
+    return NSLocalizedString(shelfTypeKey, comment: "")
+  }
 
   var isVisible: Bool = true
   var selectionIndex: Int = -1

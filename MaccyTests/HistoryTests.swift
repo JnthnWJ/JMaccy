@@ -316,6 +316,7 @@ class HistoryTests: XCTestCase {
 
     XCTAssertTrue(history.renameItem(id: first.id, to: "  Important Snippet  "))
     XCTAssertEqual(first.item.title, "Important Snippet")
+    XCTAssertEqual(first.item.customTitle, "Important Snippet")
     XCTAssertEqual(first.title, "Important Snippet")
   }
 
@@ -325,6 +326,18 @@ class HistoryTests: XCTestCase {
 
     XCTAssertFalse(history.renameItem(id: first.id, to: "   "))
     XCTAssertEqual(first.title, originalTitle)
+  }
+
+  func testLoadBackfillsLegacyCustomTitle() async throws {
+    let item = historyItem("foo")
+    item.title = "Legacy title"
+    item.customTitle = nil
+    _ = history.add(item)
+
+    try await history.load()
+
+    let loaded = history.items.first(where: { $0.id == item.id })
+    XCTAssertEqual(loaded?.item.customTitle, "Legacy title")
   }
 
   func testTagAndSearchFiltersIntersectInShelfMode() {
@@ -668,6 +681,7 @@ private struct RemoteHistoryItemSnapshot: Codable {
   var pin: String?
   var tagID: UUID?
   var title: String
+  var customTitle: String?
   var contents: [RemoteHistoryContentSnapshot]
   var isDeleted: Bool
   var shared: Bool
@@ -975,6 +989,7 @@ final class SyncReliabilityTests: XCTestCase {
       pin: nil,
       tagID: nil,
       title: isDeleted ? "" : text,
+      customTitle: nil,
       contents: isDeleted ? [] : [RemoteHistoryContentSnapshot(type: NSPasteboard.PasteboardType.string.rawValue, value: Data(text.utf8))],
       isDeleted: isDeleted,
       shared: !isDeleted

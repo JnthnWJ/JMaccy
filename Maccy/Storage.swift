@@ -46,6 +46,7 @@ private struct HistoryItemSnapshot: Codable {
   var pin: String?
   var tagID: UUID?
   var title: String
+  var customTitle: String?
   var contents: [HistoryContentSnapshot]
   var isDeleted: Bool
   var shared: Bool
@@ -1069,6 +1070,7 @@ class SyncEncryptionManager {
       pin: nil,
       tagID: nil,
       title: "",
+      customTitle: nil,
       contents: [],
       isDeleted: true,
       shared: false
@@ -1116,6 +1118,7 @@ class SyncEncryptionManager {
         pin: item.pin,
         tagID: item.tag?.id,
         title: item.title,
+        customTitle: item.customTitle,
         contents: item.contents.map { HistoryContentSnapshot(type: $0.type, value: $0.value) },
         isDeleted: false,
         shared: isItemInScope(item)
@@ -1134,6 +1137,7 @@ class SyncEncryptionManager {
         pin: nil,
         tagID: nil,
         title: "",
+        customTitle: nil,
         contents: [],
         isDeleted: true,
         shared: false
@@ -1289,6 +1293,7 @@ class SyncEncryptionManager {
       model.numberOfCopies = itemSnapshot.numberOfCopies
       model.pin = itemSnapshot.pin
       model.title = itemSnapshot.title
+      model.customTitle = itemSnapshot.customTitle
       model.contents = itemSnapshot.contents.map { HistoryItemContent(type: $0.type, value: $0.value) }
       model.tag = itemSnapshot.tagID.flatMap { tagsByID[$0] }
 
@@ -1334,6 +1339,7 @@ class SyncEncryptionManager {
       copy.numberOfCopies = item.numberOfCopies
       copy.pin = item.pin
       copy.title = item.title
+      copy.customTitle = item.customTitle
       copy.tag = item.tag.flatMap { tagMap[$0.id] }
       runtime.insert(copy)
     }

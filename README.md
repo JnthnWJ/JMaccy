@@ -3,15 +3,14 @@
 
 # JMaccy
 
-JMaccy is a fork of Maccy with a stronger "daily-driver" workflow: a vertical Shelf layout, iCloud history sync, and tagging for organization.
+JMaccy is a fork of Maccy with a new coat of paint and a few new features: a vertical Shelf layout, iCloud history sync, and tagging for organization.
 
-JMaccy works on macOS 14+.
 
 ## Features
 
 ### Vertical Shelf Mode (Main Feature)
 
-JMaccy adds a Shelf layout that presents clipboard history as a more structured, vertical workflow inspired by the paid Past app experience.
+JMaccy adds a Shelf layout that presents clipboard history as a more structured, horizontal workflow inspired by the Paste app experience.
 
 * Enable it in `Preferences -> Appearance -> Layout -> Shelf`
 * Optimized for scanning, previewing, and organizing larger histories

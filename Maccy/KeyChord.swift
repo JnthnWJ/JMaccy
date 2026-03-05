@@ -19,8 +19,8 @@ enum KeyChord: CaseIterable {
 
   static var previewKey: Key? { Sauce.shared.key(shortcut: .togglePreview) }
   static var previewModifiers: NSEvent.ModifierFlags? { KeyboardShortcuts.Shortcut(name: .togglePreview)?.modifiers }
-  static var renameKey: Key? { Sauce.shared.key(shortcut: .rename) }
-  static var renameModifiers: NSEvent.ModifierFlags? { KeyboardShortcuts.Shortcut(name: .rename)?.modifiers }
+  static var renameKey: Key { Sauce.shared.key(shortcut: .rename) ?? .r }
+  static var renameModifiers: NSEvent.ModifierFlags { KeyboardShortcuts.Shortcut(name: .rename)?.modifiers ?? [.command] }
 
   case clearHistory
   case clearHistoryAll

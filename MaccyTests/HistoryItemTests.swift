@@ -127,6 +127,12 @@ class HistoryItemTests: XCTestCase {
     XCTAssertEqual(item.title, "")
   }
 
+  func testCustomTitleCanBeStored() {
+    let item = historyItem("foo")
+    item.customTitle = "Snippet"
+    XCTAssertEqual(item.customTitle, "Snippet")
+  }
+
   func testSeveralItemsCanHaveEmptyPin() {
     let item1 = historyItem("foo")
     item1.pin = ""

@@ -123,6 +123,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   func load() async throws {
     let descriptor = FetchDescriptor<HistoryItem>()
     let results = try Storage.shared.context.fetch(descriptor)
+    backfillMissingCustomTitles(for: results)
     all = sorter.sort(results).map { HistoryItemDecorator($0) }
     loadTags()
 
@@ -191,6 +192,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       item.numberOfCopies += existingHistoryItem.numberOfCopies
       item.pin = existingHistoryItem.pin
       item.title = existingHistoryItem.title
+      item.customTitle = existingHistoryItem.customTitle
       item.tag = existingHistoryItem.tag
       item.id = existingHistoryItem.id
       item.tagAssignmentUpdatedAt = existingHistoryItem.tagAssignmentUpdatedAt
@@ -391,6 +393,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       }
     }
 
+    item.item.customTitle = nil
     item.item.title = item.item.generateTitle()
     item.title = item.item.title
     item.attributedTitle = nil
@@ -418,6 +421,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       return false
     }
 
+    item.item.customTitle = normalizedTitle
     item.item.title = normalizedTitle
     item.title = normalizedTitle
     item.attributedTitle = nil
@@ -455,6 +459,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       HistoryItemContent(type: type.rawValue, value: imageData)
     )
 
+    item.item.customTitle = nil
     item.item.title = item.item.generateTitle()
     item.title = item.item.title
     item.attributedTitle = nil
@@ -797,7 +802,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       return
     }
 
-    var proposedTitle = item.title
+    var proposedTitle = item.item.customTitle ?? item.shelfDisplayTitle
     var informativeText = NSLocalizedString("shelf_item_rename_message", comment: "")
 
     while true {
@@ -895,6 +900,13 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
   @MainActor
   private func updateTitle(item: HistoryItemDecorator, title: String) {
+    if let customTitle = item.item.customTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !customTitle.isEmpty {
+      item.title = customTitle
+      item.item.title = customTitle
+      return
+    }
+
     item.title = title
     item.item.title = title
   }
@@ -910,5 +922,35 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       item.shortcuts = KeyShortcut.create(character: String(index))
       index += 1
     }
+  }
+
+  @MainActor
+  private func backfillMissingCustomTitles(for items: [HistoryItem]) {
+    var didMutate = false
+
+    for item in items where item.customTitle == nil {
+      // Older versions did not track whether `title` came from a manual rename.
+      // For non-image items we can infer this by comparing against the generated title.
+      guard item.image == nil else {
+        continue
+      }
+
+      guard !item.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        continue
+      }
+
+      let generatedTitle = item.generateTitle()
+      if item.title != generatedTitle {
+        item.customTitle = item.title
+        didMutate = true
+      }
+    }
+
+    guard didMutate else {
+      return
+    }
+
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
   }
 }
