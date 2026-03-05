@@ -264,6 +264,13 @@ struct KeyHandlingView<Content: View>: View {
         appState.preview.togglePreview()
       }
       return true
+    case .renameCurrentItem:
+      guard shelfMode,
+            let selectedItem = appState.navigator.leadHistoryItem else {
+        return false
+      }
+      appState.history.promptRenameItem(selectedItem)
+      return true
     default:
       ()
     }

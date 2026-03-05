@@ -69,6 +69,11 @@ struct GeneralSettingsPane: View {
           .help(Text("ShowPreviewTooltip", tableName: "GeneralSettings"))
       }
 
+      Settings.Section(label: { Text("Rename", tableName: "GeneralSettings") }) {
+        KeyboardShortcuts.Recorder(for: .rename)
+          .help(Text("RenameTooltip", tableName: "GeneralSettings"))
+      }
+
       Settings.Section(
         bottomDivider: true,
         label: { Text("ShelfPreviewImageEditor", tableName: "GeneralSettings") }

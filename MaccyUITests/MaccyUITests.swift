@@ -284,6 +284,9 @@ class MaccyUITests: XCTestCase {
 
     let taggedCard = shelfCards.element(boundBy: 0)
     taggedCard.rightClick()
+    let assignTagMenu = app.menuItems["Assign Tag"]
+    assertExists(assignTagMenu)
+    assignTagMenu.hover()
     app.menuItems["Remove Tag"].click()
 
     waitForShelfCardCount(0)

@@ -311,6 +311,22 @@ class HistoryTests: XCTestCase {
     XCTAssertNil(first.item.tag)
   }
 
+  func testRenameItemUpdatesTitle() {
+    let first = history.add(historyItem("foo"))
+
+    XCTAssertTrue(history.renameItem(id: first.id, to: "  Important Snippet  "))
+    XCTAssertEqual(first.item.title, "Important Snippet")
+    XCTAssertEqual(first.title, "Important Snippet")
+  }
+
+  func testRenameItemRejectsEmptyTitles() {
+    let first = history.add(historyItem("foo"))
+    let originalTitle = first.title
+
+    XCTAssertFalse(history.renameItem(id: first.id, to: "   "))
+    XCTAssertEqual(first.title, originalTitle)
+  }
+
   func testTagAndSearchFiltersIntersectInShelfMode() {
     Defaults[.popupLayoutMode] = .shelf
 

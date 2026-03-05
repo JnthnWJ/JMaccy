@@ -1,5 +1,5 @@
 // swiftlint:disable file_length
-import AppKit.NSRunningApplication
+import AppKit
 import Defaults
 import Foundation
 import Logging
@@ -408,6 +408,33 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
   @MainActor
   @discardableResult
+  func renameItem(id itemID: UUID, to newTitle: String) -> Bool {
+    guard let item = all.first(where: { $0.id == itemID }) else {
+      return false
+    }
+
+    let normalizedTitle = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !normalizedTitle.isEmpty else {
+      return false
+    }
+
+    item.item.title = normalizedTitle
+    item.title = normalizedTitle
+    item.attributedTitle = nil
+    item.item.updatedAt = Date.now
+
+    Storage.shared.context.processPendingChanges()
+    try? Storage.shared.context.save()
+
+    applyCurrentFilters()
+    SyncEncryptionManager.shared.handleHistoryMutation()
+    AppState.shared.popup.needsResize = true
+
+    return true
+  }
+
+  @MainActor
+  @discardableResult
   func replaceImageContent(
     for itemID: UUID,
     imageData: Data,
@@ -746,6 +773,58 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
     Clipboard.shared.copy(item.copyableImageText)
     SyncEncryptionManager.shared.recordProtectedActionCompleted()
+  }
+
+  @MainActor
+  func pasteWithoutFormatting(_ item: HistoryItemDecorator?) {
+    guard let item else {
+      return
+    }
+
+    AppState.shared.popup.close()
+    Clipboard.shared.copy(item.item, removeFormatting: true)
+    Clipboard.shared.paste()
+
+    Task {
+      searchQuery = ""
+    }
+    SyncEncryptionManager.shared.recordProtectedActionCompleted()
+  }
+
+  @MainActor
+  func promptRenameItem(_ item: HistoryItemDecorator?) {
+    guard let item else {
+      return
+    }
+
+    var proposedTitle = item.title
+    var informativeText = NSLocalizedString("shelf_item_rename_message", comment: "")
+
+    while true {
+      let alert = NSAlert()
+      alert.messageText = NSLocalizedString("shelf_item_rename_title", comment: "")
+      alert.informativeText = informativeText
+
+      let titleField = NSTextField(string: proposedTitle)
+      titleField.placeholderString = NSLocalizedString("shelf_item_rename_placeholder", comment: "")
+      titleField.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
+      alert.accessoryView = titleField
+
+      alert.addButton(withTitle: NSLocalizedString("shelf_item_rename_save", comment: ""))
+      alert.addButton(withTitle: NSLocalizedString("clear_alert_cancel", comment: ""))
+
+      let response = alert.runModal()
+      guard response == .alertFirstButtonReturn else {
+        return
+      }
+
+      proposedTitle = titleField.stringValue
+      if renameItem(id: item.id, to: proposedTitle) {
+        return
+      }
+
+      informativeText = NSLocalizedString("shelf_item_rename_error_empty", comment: "")
+    }
   }
 
   @MainActor

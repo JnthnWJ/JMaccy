@@ -1,168 +1,117 @@
 
 <img width="128px" src="https://maccy.app/img/maccy/Logo.png" alt="Logo" />
 
-# [Maccy](https://maccy.app)
+# JMaccy
 
-[![Downloads](https://img.shields.io/github/downloads/p0deje/Maccy/total.svg)](https://github.com/p0deje/Maccy/releases/latest)
-[![Build Status](https://img.shields.io/bitrise/716921b669780314/master?token=3pMiCb5dpFzlO-7jTYtO3Q)](https://app.bitrise.io/app/716921b669780314)
+JMaccy is a fork of Maccy with a stronger "daily-driver" workflow: a vertical Shelf layout, iCloud history sync, and tagging for organization.
 
-Maccy is a lightweight clipboard manager for macOS. It keeps the history of what you copy
-and lets you quickly navigate, search, and use previous clipboard contents.
-
-Maccy works on macOS Sonoma 14 or higher.
-
-<!-- vim-markdown-toc GFM -->
-
-* [Features](#features)
-* [Install](#install)
-* [Usage](#usage)
-* [Advanced](#advanced)
-  * [Ignore Copied Items](#ignore-copied-items)
-  * [Ignore Custom Copy Types](#ignore-custom-copy-types)
-  * [Speed up Clipboard Check Interval](#speed-up-clipboard-check-interval)
-* [FAQ](#faq)
-  * [Why doesn't it paste when I select an item in history?](#why-doesnt-it-paste-when-i-select-an-item-in-history)
-  * [When assigning a hotkey to open Maccy, it says that this hotkey is already used in some system setting.](#when-assigning-a-hotkey-to-open-maccy-it-says-that-this-hotkey-is-already-used-in-some-system-setting)
-  * [How to restore hidden footer?](#how-to-restore-hidden-footer)
-  * [How to ignore copies from Universal Clipboard?](#how-to-ignore-copies-from-universal-clipboard)
-  * [My keyboard shortcut stopped working in password fields. How do I fix this?](#my-keyboard-shortcut-stopped-working-in-password-fields-how-do-i-fix-this)
-* [Translations](#translations)
-* [Motivation](#motivation)
-* [License](#license)
-
-<!-- vim-markdown-toc -->
+JMaccy works on macOS 14+.
 
 ## Features
 
-* Lightweight and fast
-* Keyboard-first
-* Secure and private
-* Native UI
-* Open source and free
+### Vertical Shelf Mode (Main Feature)
+
+JMaccy adds a Shelf layout that presents clipboard history as a more structured, vertical workflow inspired by the paid Past app experience.
+
+* Enable it in `Preferences -> Appearance -> Layout -> Shelf`
+* Optimized for scanning, previewing, and organizing larger histories
+* Includes richer card-like metadata and a focused item preview workflow
+
+Note: Shelf layout currently requires macOS 26+.
+
+### iCloud Clipboard Sync
+
+Clipboard history can sync across your devices through iCloud.
+
+* Enable it in `Preferences -> Storage -> Sync & Encryption`
+* Optional encryption for local + iCloud synced history
+* Sync scope options: all items, pinned items only, or text only
+* Tags are synced across devices as well
+
+### Tagging
+
+JMaccy adds tag-based organization for clipboard history.
+
+* Create tags from the Shelf header
+* Assign tags to items from item actions
+* Filter history by tag
+* Rename/delete tags and customize their colors
+
+### Core Maccy Behavior
+
+* Lightweight and keyboard-first clipboard history
+* Fast search and quick paste/copy actions
+* Pinning, deleting, clearing, and ignore controls
+* Native macOS UI
 
 ## Install
 
-Download the latest version from the [releases](https://github.com/p0deje/Maccy/releases/latest) page, or use [Homebrew](https://brew.sh/):
+### Option 1: Download a release
+
+Download the latest app build from the [JMaccy releases](https://github.com/JnthnWJ/JMaccy/releases/latest) page.
+
+### Option 2: Build from source
 
 ```sh
-brew install maccy
+git clone https://github.com/JnthnWJ/JMaccy.git
+cd JMaccy
+open Maccy.xcodeproj
 ```
+
+Build and run the `Maccy` target in Xcode.
 
 ## Usage
 
-1. <kbd>SHIFT (⇧)</kbd> + <kbd>COMMAND (⌘)</kbd> + <kbd>C</kbd> to popup Maccy or click on its icon in the menu bar.
-2. Type what you want to find.
-3. To select the history item you wish to copy, press <kbd>ENTER</kbd>, or click the item, or use <kbd>COMMAND (⌘)</kbd> + `n` shortcut.
-4. To choose the history item and paste, press <kbd>OPTION (⌥)</kbd> + <kbd>ENTER</kbd>, or <kbd>OPTION (⌥)</kbd> + <kbd>CLICK</kbd> the item, or use <kbd>OPTION (⌥)</kbd> + `n` shortcut.
-5. To choose the history item and paste without formatting, press <kbd>OPTION (⌥)</kbd> + <kbd>SHIFT (⇧)</kbd> + <kbd>ENTER</kbd>, or <kbd>OPTION (⌥)</kbd> + <kbd>SHIFT (⇧)</kbd> + <kbd>CLICK</kbd> the item, or use <kbd>OPTION (⌥)</kbd> + <kbd>SHIFT (⇧)</kbd> + `n` shortcut.
-6. To delete the history item, press <kbd>OPTION (⌥)</kbd> + <kbd>DELETE (⌫)</kbd>.
-7. To see the full text of the history item, wait a couple of seconds for tooltip.
-8. To pin the history item so that it remains on top of the list, press <kbd>OPTION (⌥)</kbd> + <kbd>P</kbd>. The item will be moved to the top with a random but permanent keyboard shortcut. To unpin it, press <kbd>OPTION (⌥)</kbd> + <kbd>P</kbd> again.
-9. To clear all unpinned items, select _Clear_ in the menu, or press <kbd>OPTION (⌥)</kbd> + <kbd>COMMAND (⌘)</kbd> + <kbd>DELETE (⌫)</kbd>. To clear all items including pinned, select _Clear_ in the menu with  <kbd>OPTION (⌥)</kbd> pressed, or press <kbd>SHIFT (⇧)</kbd> + <kbd>OPTION (⌥)</kbd> + <kbd>COMMAND (⌘)</kbd> + <kbd>DELETE (⌫)</kbd>.
-10. To disable Maccy and ignore new copies, click on the menu icon with <kbd>OPTION (⌥)</kbd> pressed.
-11. To ignore only the next copy, click on the menu icon with <kbd>OPTION (⌥)</kbd> + <kbd>SHIFT (⇧)</kbd> pressed.
-12. To customize the behavior, check "Preferences…" window, or press <kbd>COMMAND (⌘)</kbd> + <kbd>,</kbd>.
+1. Press <kbd>SHIFT (⇧)</kbd> + <kbd>COMMAND (⌘)</kbd> + <kbd>C</kbd> to open JMaccy.
+2. Type to search clipboard history.
+3. Press <kbd>ENTER</kbd> to copy selected item, or <kbd>OPTION (⌥)</kbd> + <kbd>ENTER</kbd> to paste it.
+4. Use <kbd>OPTION (⌥)</kbd> + <kbd>P</kbd> to pin/unpin.
+5. In Shelf mode, use tags to group and filter items.
 
 ## Advanced
 
 ### Ignore Copied Items
 
-You can tell Maccy to ignore all copied items:
-
 ```sh
-defaults write org.p0deje.Maccy ignoreEvents true # default is false
+defaults write com.jnthnwj.JMaccy ignoreEvents true
 ```
 
-This is useful if you have some workflow for copying sensitive data. You can set `ignoreEvents` to true, copy the data and set `ignoreEvents` back to false.
-
-You can also click the menu icon with <kbd>OPTION (⌥)</kbd> pressed. To ignore only the next copy, click with <kbd>OPTION (⌥)</kbd> + <kbd>SHIFT (⇧)</kbd> pressed.
+Set it back to `false` to resume capture.
 
 ### Ignore Custom Copy Types
 
-By default Maccy will ignore certain copy types that are considered to be confidential
-or temporary. The default list always include the following types:
+Open `Preferences -> Ignore -> Pasteboard Types` to add custom types you want to skip.
 
-* `org.nspasteboard.TransientType`
-* `org.nspasteboard.ConcealedType`
-* `org.nspasteboard.AutoGeneratedType`
-
-Also, default configuration includes the following types but they can be removed
-or overwritten:
-
-* `com.agilebits.onepassword`
-* `com.typeit4me.clipping`
-* `de.petermaurer.TransientPasteboardType`
-* `Pasteboard generator type`
-* `net.antelle.keeweb`
-
-You can add additional custom types using settings.
-To find what custom types are used by an application, you can use
-free application [Pasteboard-Viewer](https://github.com/sindresorhus/Pasteboard-Viewer).
-Simply download the application, open it, copy something from the application you
-want to ignore and look for any custom types in the left sidebar. [Here is an example
-of using this approach to ignore Adobe InDesign](https://github.com/p0deje/Maccy/issues/125).
+Useful helper app: [Pasteboard-Viewer](https://github.com/sindresorhus/Pasteboard-Viewer).
 
 ### Speed up Clipboard Check Interval
 
-By default, Maccy checks clipboard every 500 ms, which should be enough for most users. If you want
-to speed it up, you can change it with `defaults`:
-
 ```sh
-defaults write org.p0deje.Maccy clipboardCheckInterval 0.1 # 100 ms
+defaults write com.jnthnwj.JMaccy clipboardCheckInterval 0.1
 ```
 
 ## FAQ
 
 ### Why doesn't it paste when I select an item in history?
 
-1. Make sure you have "Paste automatically" enabled in Preferences.
-2. Make sure "Maccy" is added to System Settings -> Privacy & Security -> Accessibility.
+1. Enable "Paste automatically" in Preferences.
+2. Make sure JMaccy has Accessibility permission in macOS settings.
 
-### When assigning a hotkey to open Maccy, it says that this hotkey is already used in some system setting.
+### How do I restore a hidden footer?
 
-1. Open System settings -> Keyboard -> Keyboard Shortcuts.
-2. Find where that hotkey is used. For example, "Convert text to simplified Chinese" is under Services -> Text.
-3. Disable that hotkey or remove assigned combination ([screenshot](https://github.com/p0deje/Maccy/assets/576152/446719e6-c3e5-4eb0-95fb-5a811066487f)).
-4. Restart Maccy.
-5. Assign hotkey in Maccy settings.
-
-### How to restore hidden footer?
-
-1. Open Maccy window.
-2. Press <kbd>COMMAND (⌘)</kbd> + <kbd>,</kbd> to open preferences.
-3. Enable footer in Appearance section.
-
-If for some reason it doesn't work, run the following command in Terminal.app:
+Run:
 
 ```sh
-defaults write org.p0deje.Maccy showFooter 1
+defaults write com.jnthnwj.JMaccy showFooter 1
 ```
 
-### How to ignore copies from [Universal Clipboard](https://support.apple.com/en-us/102430)?
+### How do I ignore Universal Clipboard copies?
 
-1. Open Preferences -> Ignore -> Pasteboard Types.
-2. Add `com.apple.is-remote-clipboard`.
+Add `com.apple.is-remote-clipboard` in `Preferences -> Ignore -> Pasteboard Types`.
 
 ### My keyboard shortcut stopped working in password fields. How do I fix this?
 
-If your shortcut produces a character (like `Option+C` → "ç"), macOS security may block it in password fields. Use [Karabiner-Elements](https://karabiner-elements.pqrs.org/) to remap your shortcut to a different combination like `Cmd+Shift+C`. [See detailed solution](docs/keyboard-shortcut-password-fields.md).
-
-## Translations
-
-The translations are hosted in [Weblate](https://hosted.weblate.org/engage/maccy/).
-You can use it to suggest changes in translations and localize the application to a new language.
-
-[![Translation status](https://hosted.weblate.org/widget/maccy/multi-auto.svg)](https://hosted.weblate.org/engage/maccy/)
-
-## Motivation
-
-There are dozens of similar applications out there, so why build another?
-Over the past years since I moved from Linux to macOS, I struggled to find
-a clipboard manager that is as free and simple as [Parcellite](http://parcellite.sourceforge.net),
-but I couldn't. So I've decided to build one.
-
-Also, I wanted to learn Swift and get acquainted with macOS application development.
-
+Use [Karabiner-Elements](https://karabiner-elements.pqrs.org/) to remap to a non-text-producing shortcut (example: `Cmd+Shift+C`). More detail: [docs/keyboard-shortcut-password-fields.md](docs/keyboard-shortcut-password-fields.md).
 
 ## License
 

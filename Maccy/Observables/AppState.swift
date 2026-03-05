@@ -234,15 +234,23 @@ class ShelfPreview {
   @ObservationIgnored private var pendingOpenRequestID: UUID?
 
   var canShareSelection: Bool {
-    guard let item = AppState.shared.navigator.leadHistoryItem else {
+    canShare(item: AppState.shared.navigator.leadHistoryItem)
+  }
+
+  var canEditSelection: Bool {
+    canEdit(item: AppState.shared.navigator.leadHistoryItem)
+  }
+
+  func canShare(item: HistoryItemDecorator?) -> Bool {
+    guard let item else {
       return false
     }
 
     return !shareItems(for: item).isEmpty
   }
 
-  var canEditSelection: Bool {
-    guard let item = AppState.shared.navigator.leadHistoryItem else {
+  func canEdit(item: HistoryItemDecorator?) -> Bool {
+    guard let item else {
       return false
     }
 
@@ -481,10 +489,19 @@ class ShelfPreview {
       return
     }
 
+    share(item: item)
+  }
+
+  func share(item: HistoryItemDecorator) {
     let items = shareItems(for: item)
-    guard !items.isEmpty,
-          let panel = previewPanel,
-          let contentView = panel.contentView else {
+    guard !items.isEmpty else {
+      return
+    }
+
+    let previewContentView = (previewPanel?.isVisible == true) ? previewPanel?.contentView : nil
+    guard let contentView = previewContentView
+      ?? AppState.shared.appDelegate?.panel.contentView
+      ?? NSApp.keyWindow?.contentView else {
       return
     }
 
@@ -498,6 +515,10 @@ class ShelfPreview {
       return
     }
 
+    edit(item: item)
+  }
+
+  func edit(item: HistoryItemDecorator) {
     switch item.shelfCardType {
     case .image:
       startImageEditing(item)

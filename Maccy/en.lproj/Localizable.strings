@@ -52,3 +52,12 @@
 "shelf_tag_delete" = "Delete";
 "shelf_tag_rename" = "Rename";
 "shelf_tag_remove_item" = "Remove Tag";
+"shelf_paste_without_formatting" = "Paste without formatting";
+"shelf_item_rename" = "Rename";
+"shelf_assign_tag" = "Assign Tag";
+"shelf_assign_tag_none" = "No tags available";
+"shelf_item_rename_title" = "Rename Item";
+"shelf_item_rename_message" = "Enter a new title for this clipboard item.";
+"shelf_item_rename_placeholder" = "Title";
+"shelf_item_rename_save" = "Save";
+"shelf_item_rename_error_empty" = "Title cannot be empty.";

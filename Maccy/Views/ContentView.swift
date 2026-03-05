@@ -999,21 +999,57 @@ private struct ShelfCardView: View {
     .accessibilityLabel(Text(verbatim: cardTitle))
     .accessibilityValue(Text(verbatim: isSelected ? "selected" : "unselected"))
     .contextMenu {
-      if item.canCopyImageText {
+      if item.hasImage {
         Button("Copy Image Text") {
           appState.history.copyImageText(from: item)
         }
+        .disabled(!item.canCopyImageText)
       }
 
-      if item.isTagged {
-        if item.canCopyImageText {
+      Button("shelf_paste_without_formatting") {
+        appState.history.pasteWithoutFormatting(item)
+      }
+
+      Button("shelf_item_rename") {
+        appState.history.promptRenameItem(item)
+      }
+
+      Menu("shelf_assign_tag") {
+        if item.isTagged {
+          Button("shelf_tag_remove_item") {
+            appState.history.removeTag(from: item)
+          }
+
           Divider()
         }
 
-        Button("shelf_tag_remove_item") {
-          appState.history.removeTag(from: item)
+        if appState.history.tags.isEmpty {
+          Button("shelf_assign_tag_none") {}
+            .disabled(true)
+        } else {
+          ForEach(appState.history.tags) { tag in
+            Button {
+              _ = appState.history.assignTag(tagID: tag.id, toItemID: item.id)
+            } label: {
+              if item.item.tag?.id == tag.id {
+                Label(tag.name, systemImage: "checkmark")
+              } else {
+                Text(verbatim: tag.name)
+              }
+            }
+          }
         }
       }
+
+      Button("Edit") {
+        appState.shelfPreview.edit(item: item)
+      }
+      .disabled(!appState.shelfPreview.canEdit(item: item))
+
+      Button("Share") {
+        appState.shelfPreview.share(item: item)
+      }
+      .disabled(!appState.shelfPreview.canShare(item: item))
     }
     .onAppear {
       item.ensureThumbnailImage()

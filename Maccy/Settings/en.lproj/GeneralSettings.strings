@@ -10,6 +10,8 @@
 "DeleteTooltip" = "Shortcut key to delete history item.\nDefault: ⌫.";
 "ShowPreview" = "Preview:";
 "ShowPreviewTooltip" = "Show preview with additional information.\nDefault: Space.";
+"Rename" = "Rename:";
+"RenameTooltip" = "Shortcut key to rename selected shelf history item.\nDefault: ⌘R.";
 "ShelfPreviewImageEditor" = "Shelf image editor:";
 "ShelfPreviewImageEditorNotSet" = "No app selected";
 "ShelfPreviewImageEditorChoose" = "Choose App…";

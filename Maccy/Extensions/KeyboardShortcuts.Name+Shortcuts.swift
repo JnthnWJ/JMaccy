@@ -5,4 +5,5 @@ extension KeyboardShortcuts.Name {
   static let pin = Self("pin", default: Shortcut(.p, modifiers: [.option]))
   static let delete = Self("delete", default: Shortcut(.delete))
   static let togglePreview = Self("togglePreview", default: Shortcut(.space))
+  static let rename = Self("rename", default: Shortcut(.r, modifiers: [.command]))
 }
