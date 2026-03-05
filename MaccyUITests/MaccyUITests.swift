@@ -292,6 +292,30 @@ class MaccyUITests: XCTestCase {
     waitForShelfCardCount(0)
   }
 
+  func testShelfCardContextMenuEditOpensTextEditor() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    _ = seedShelfCopies(count: 4)
+    popUpWithMouse()
+
+    assertShelfCardSelected(0)
+
+    let secondCard = shelfCards.element(boundBy: 1)
+    assertExists(secondCard)
+    expectation(for: NSPredicate(format: "isHittable = 1"), evaluatedWith: secondCard)
+    waitForExpectations(timeout: 3)
+    secondCard.rightClick()
+
+    app.menuItems["Edit"].click()
+
+    assertShelfCardSelected(1)
+
+    let editor = app.descendants(matching: .any)["shelf-text-editor"]
+    assertExists(editor)
+    app.buttons["shelf-text-editor-cancel"].click()
+    assertNotExists(editor)
+  }
+
   func testShelfCardClickSelectsExactCardAcrossDirections() throws {
     try skipIfShelfUnavailable()
     setPopupLayoutMode("shelf")

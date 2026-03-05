@@ -1037,7 +1037,11 @@ private struct ShelfCardView: View {
       }
 
       Button("Edit") {
-        appState.shelfPreview.edit(item: item)
+        let itemToEdit = item
+        DispatchQueue.main.async {
+          appState.navigator.select(item: itemToEdit)
+          appState.shelfPreview.editSelection()
+        }
       }
       .disabled(!appState.shelfPreview.canEdit(item: item))
 
