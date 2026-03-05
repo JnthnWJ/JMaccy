@@ -390,6 +390,37 @@ class HistoryTests: XCTestCase {
     XCTAssertEqual(AppState.shared.navigator.leadHistoryItem?.id, middle.id)
   }
 
+  func testShelfClosedSelectionMovesToNewestAfterClipboardCopy() {
+    Defaults[.popupLayoutMode] = .shelf
+
+    _ = history.add(historyItem("oldest"))
+    let middle = history.add(historyItem("middle"))
+
+    AppState.shared.navigator.select(item: middle)
+    XCTAssertEqual(AppState.shared.navigator.leadHistoryItem?.id, middle.id)
+
+    history.handleNewClipboardCopy(historyItem("newest"))
+
+    XCTAssertEqual(AppState.shared.navigator.leadHistoryItem?.id, history.items.first?.id)
+    XCTAssertNotEqual(AppState.shared.navigator.leadHistoryItem?.id, middle.id)
+  }
+
+  func testShelfClosedSelectionClearsWhenNewestClipboardCopyIsFilteredOut() {
+    Defaults[.popupLayoutMode] = .shelf
+
+    let taggedItem = history.add(historyItem("tagged"))
+    let work = history.createTag(name: "Work", color: .blue)!
+    XCTAssertTrue(history.assignTag(tagID: work.id, toItemID: taggedItem.id))
+    history.selectTag(work.id)
+
+    AppState.shared.navigator.select(item: taggedItem)
+    XCTAssertEqual(AppState.shared.navigator.leadHistoryItem?.id, taggedItem.id)
+
+    history.handleNewClipboardCopy(historyItem("untagged"))
+
+    XCTAssertNil(AppState.shared.navigator.leadHistoryItem)
+  }
+
   func testUpdateTextContentReplacesItemText() {
     let item = history.add(historyItem("foo"))
 

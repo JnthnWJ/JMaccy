@@ -42,7 +42,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     AppState.shared.appDelegate = self
     SyncEncryptionManager.shared.bootstrap()
 
-    Clipboard.shared.onNewCopy { History.shared.add($0) }
+    Clipboard.shared.onNewCopy { History.shared.handleNewClipboardCopy($0) }
     Clipboard.shared.start()
 
     Task {

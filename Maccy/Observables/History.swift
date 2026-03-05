@@ -242,6 +242,20 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   }
 
   @MainActor
+  func handleNewClipboardCopy(_ item: HistoryItem) {
+    let addedItem = add(item)
+    guard AppState.shared.shelfModeEnabled, AppState.shared.popup.isClosed() else {
+      return
+    }
+
+    if addedItem.isVisible {
+      AppState.shared.navigator.selectWithoutScrolling(item: addedItem, footerItem: nil)
+    } else {
+      AppState.shared.navigator.selectWithoutScrolling(item: nil, footerItem: nil)
+    }
+  }
+
+  @MainActor
   private func withLogging(_ msg: String, _ block: () throws -> Void) rethrows {
     func dataCounts() -> String {
       let historyItemCount = try? Storage.shared.context.fetchCount(FetchDescriptor<HistoryItem>())
