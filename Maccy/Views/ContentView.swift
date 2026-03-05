@@ -892,6 +892,12 @@ private struct ShelfCardView: View {
     let thumbnailImage = item.thumbnailImage
     let cardTitle = item.title.isEmpty ? item.text.shortened(to: 80) : item.title.shortened(to: 80)
     let cardBodyText = item.shelfExcerpt.isEmpty ? cardTitle : item.shelfExcerpt
+    let shelfContentBackgroundColor = item.shelfContentBackgroundColor
+    let shelfContentForegroundColor = item.shelfContentForegroundColor
+    let bodyBackgroundColor = shelfContentBackgroundColor ?? Color(nsColor: .windowBackgroundColor).opacity(0.86)
+    let metadataBackgroundColor = shelfContentBackgroundColor ?? Color(nsColor: .windowBackgroundColor).opacity(0.9)
+    let bodyTextColor = shelfContentForegroundColor ?? .secondary
+    let metadataTextColor = shelfContentForegroundColor?.opacity(0.88) ?? .secondary
 
     Button {
       onCardTap(item.id)
@@ -945,7 +951,7 @@ private struct ShelfCardView: View {
             VStack(alignment: .leading, spacing: 8) {
               Text(cardBodyText)
                 .font(.body)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(bodyTextColor)
                 .lineLimit(7)
 
               Spacer(minLength: 0)
@@ -954,18 +960,18 @@ private struct ShelfCardView: View {
             .padding(10)
           }
         }
-        .background(Color(nsColor: .windowBackgroundColor).opacity(0.86))
+        .background(bodyBackgroundColor)
 
         HStack {
           Text(item.shelfMetadata)
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(metadataTextColor)
             .lineLimit(1)
           Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(Color(nsColor: .windowBackgroundColor).opacity(0.9))
+        .background(metadataBackgroundColor)
       }
       .frame(width: 260, height: 220)
       .background(.ultraThinMaterial)

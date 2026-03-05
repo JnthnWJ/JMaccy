@@ -179,6 +179,51 @@ class HistoryItemDecoratorTests: XCTestCase {
     assertColorsEqual(itemDecorator.shelfHeaderColor, originalColor)
   }
 
+  func testShelfContentBackgroundColorUsesHexCode() {
+    let itemDecorator = historyItemDecorator("#F5AB82")
+    assertColorsEqual(
+      itemDecorator.shelfContentBackgroundColor!,
+      Color(red: 245.0 / 255, green: 171.0 / 255, blue: 130.0 / 255)
+    )
+  }
+
+  func testShelfContentBackgroundColorUsesRGBCode() {
+    let itemDecorator = historyItemDecorator("rgb(245, 171, 130)")
+    assertColorsEqual(
+      itemDecorator.shelfContentBackgroundColor!,
+      Color(red: 245.0 / 255, green: 171.0 / 255, blue: 130.0 / 255)
+    )
+  }
+
+  func testShelfContentBackgroundColorUsesHSLCode() {
+    let itemDecorator = historyItemDecorator("hsl(25, 83%, 74%)")
+    XCTAssertNotNil(itemDecorator.shelfContentBackgroundColor)
+  }
+
+  func testShelfContentBackgroundColorUsesHWBCode() {
+    let itemDecorator = historyItemDecorator("hwb(25 51% 4%)")
+    XCTAssertNotNil(itemDecorator.shelfContentBackgroundColor)
+  }
+
+  func testShelfContentBackgroundColorUsesCMYKCode() {
+    let itemDecorator = historyItemDecorator("cmyk(0%, 30%, 47%, 4%)")
+    XCTAssertNotNil(itemDecorator.shelfContentBackgroundColor)
+  }
+
+  func testShelfContentBackgroundColorIgnoresRegularText() {
+    let itemDecorator = historyItemDecorator("This is not a color code")
+    XCTAssertNil(itemDecorator.shelfContentBackgroundColor)
+    XCTAssertNil(itemDecorator.shelfContentForegroundColor)
+  }
+
+  func testShelfContentForegroundColorUsesContrast() {
+    let darkColorDecorator = historyItemDecorator("#000000")
+    assertColorsEqual(darkColorDecorator.shelfContentForegroundColor!, .white)
+
+    let lightColorDecorator = historyItemDecorator("#FFFFFF")
+    assertColorsEqual(lightColorDecorator.shelfContentForegroundColor!, .black)
+  }
+
   private func historyItemDecorator(
     _ value: String?,
     application: String? = "com.apple.finder"
