@@ -169,6 +169,13 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     return Color(nsColor: Self.contrastingTextColor(for: color))
   }
 
+  var shelfNamedColorName: String? {
+    guard let color = shelfParsedColorCode else {
+      return nil
+    }
+    return Self.closestNamedColorName(for: color)
+  }
+
   func hash(into hasher: inout Hasher) {
     // We need to hash title and attributedTitle, so SwiftUI knows it needs to update the view if they chage
     hasher.combine(id)
@@ -731,9 +738,254 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     return min(max(value, 0), 1)
   }
 
-  private static func contrastingTextColor(for color: NSColor) -> NSColor {
+  private struct NamedColor {
+    let name: String
+    let red: Double
+    let green: Double
+    let blue: Double
+  }
+
+  private struct LabColor {
+    let l: Double
+    let a: Double
+    let b: Double
+  }
+
+  private static let namedColorPalette: [NamedColor] = [
+    NamedColor(name: "Alice Blue", red: 0.941176, green: 0.972549, blue: 1.000000),
+    NamedColor(name: "Antique White", red: 0.980392, green: 0.921569, blue: 0.843137),
+    NamedColor(name: "Aqua", red: 0.000000, green: 1.000000, blue: 1.000000),
+    NamedColor(name: "Aquamarine", red: 0.498039, green: 1.000000, blue: 0.831373),
+    NamedColor(name: "Azure", red: 0.941176, green: 1.000000, blue: 1.000000),
+    NamedColor(name: "Beige", red: 0.960784, green: 0.960784, blue: 0.862745),
+    NamedColor(name: "Bisque", red: 1.000000, green: 0.894118, blue: 0.768627),
+    NamedColor(name: "Black", red: 0.000000, green: 0.000000, blue: 0.000000),
+    NamedColor(name: "Blanched Almond", red: 1.000000, green: 0.921569, blue: 0.803922),
+    NamedColor(name: "Blue", red: 0.000000, green: 0.000000, blue: 1.000000),
+    NamedColor(name: "Blue Violet", red: 0.541176, green: 0.168627, blue: 0.886275),
+    NamedColor(name: "Brown", red: 0.647059, green: 0.164706, blue: 0.164706),
+    NamedColor(name: "Burly Wood", red: 0.870588, green: 0.721569, blue: 0.529412),
+    NamedColor(name: "Cadet Blue", red: 0.372549, green: 0.619608, blue: 0.627451),
+    NamedColor(name: "Chartreuse", red: 0.498039, green: 1.000000, blue: 0.000000),
+    NamedColor(name: "Chocolate", red: 0.823529, green: 0.411765, blue: 0.117647),
+    NamedColor(name: "Coral", red: 1.000000, green: 0.498039, blue: 0.313725),
+    NamedColor(name: "Cornflower Blue", red: 0.392157, green: 0.584314, blue: 0.929412),
+    NamedColor(name: "Cornsilk", red: 1.000000, green: 0.972549, blue: 0.862745),
+    NamedColor(name: "Crimson", red: 0.862745, green: 0.078431, blue: 0.235294),
+    NamedColor(name: "Cyan", red: 0.000000, green: 1.000000, blue: 1.000000),
+    NamedColor(name: "Dark Blue", red: 0.000000, green: 0.000000, blue: 0.545098),
+    NamedColor(name: "Dark Cyan", red: 0.000000, green: 0.545098, blue: 0.545098),
+    NamedColor(name: "Dark Goldenrod", red: 0.721569, green: 0.525490, blue: 0.043137),
+    NamedColor(name: "Dark Gray", red: 0.662745, green: 0.662745, blue: 0.662745),
+    NamedColor(name: "Dark Green", red: 0.000000, green: 0.392157, blue: 0.000000),
+    NamedColor(name: "Dark Grey", red: 0.662745, green: 0.662745, blue: 0.662745),
+    NamedColor(name: "Dark Khaki", red: 0.741176, green: 0.717647, blue: 0.419608),
+    NamedColor(name: "Dark Magenta", red: 0.545098, green: 0.000000, blue: 0.545098),
+    NamedColor(name: "Dark Olive Green", red: 0.333333, green: 0.419608, blue: 0.184314),
+    NamedColor(name: "Dark Orange", red: 1.000000, green: 0.549020, blue: 0.000000),
+    NamedColor(name: "Dark Orchid", red: 0.600000, green: 0.196078, blue: 0.800000),
+    NamedColor(name: "Dark Red", red: 0.545098, green: 0.000000, blue: 0.000000),
+    NamedColor(name: "Dark Salmon", red: 0.913725, green: 0.588235, blue: 0.478431),
+    NamedColor(name: "Dark Sea Green", red: 0.560784, green: 0.737255, blue: 0.560784),
+    NamedColor(name: "Dark Slate Blue", red: 0.282353, green: 0.239216, blue: 0.545098),
+    NamedColor(name: "Dark Slate Gray", red: 0.184314, green: 0.309804, blue: 0.309804),
+    NamedColor(name: "Dark Slate Grey", red: 0.184314, green: 0.309804, blue: 0.309804),
+    NamedColor(name: "Dark Turquoise", red: 0.000000, green: 0.807843, blue: 0.819608),
+    NamedColor(name: "Dark Violet", red: 0.580392, green: 0.000000, blue: 0.827451),
+    NamedColor(name: "Deep Pink", red: 1.000000, green: 0.078431, blue: 0.576471),
+    NamedColor(name: "Deep Sky Blue", red: 0.000000, green: 0.749020, blue: 1.000000),
+    NamedColor(name: "Dim Gray", red: 0.411765, green: 0.411765, blue: 0.411765),
+    NamedColor(name: "Dim Grey", red: 0.411765, green: 0.411765, blue: 0.411765),
+    NamedColor(name: "Dodger Blue", red: 0.117647, green: 0.564706, blue: 1.000000),
+    NamedColor(name: "Fire Brick", red: 0.698039, green: 0.133333, blue: 0.133333),
+    NamedColor(name: "Floral White", red: 1.000000, green: 0.980392, blue: 0.941176),
+    NamedColor(name: "Forest Green", red: 0.133333, green: 0.545098, blue: 0.133333),
+    NamedColor(name: "Fuchsia", red: 1.000000, green: 0.000000, blue: 1.000000),
+    NamedColor(name: "Gainsboro", red: 0.862745, green: 0.862745, blue: 0.862745),
+    NamedColor(name: "Ghost White", red: 0.972549, green: 0.972549, blue: 1.000000),
+    NamedColor(name: "Gold", red: 1.000000, green: 0.843137, blue: 0.000000),
+    NamedColor(name: "Goldenrod", red: 0.854902, green: 0.647059, blue: 0.125490),
+    NamedColor(name: "Gray", red: 0.501961, green: 0.501961, blue: 0.501961),
+    NamedColor(name: "Green", red: 0.000000, green: 0.501961, blue: 0.000000),
+    NamedColor(name: "Green Yellow", red: 0.678431, green: 1.000000, blue: 0.184314),
+    NamedColor(name: "Grey", red: 0.501961, green: 0.501961, blue: 0.501961),
+    NamedColor(name: "Honeydew", red: 0.941176, green: 1.000000, blue: 0.941176),
+    NamedColor(name: "Hot Pink", red: 1.000000, green: 0.411765, blue: 0.705882),
+    NamedColor(name: "Indian Red", red: 0.803922, green: 0.360784, blue: 0.360784),
+    NamedColor(name: "Indigo", red: 0.294118, green: 0.000000, blue: 0.509804),
+    NamedColor(name: "Ivory", red: 1.000000, green: 1.000000, blue: 0.941176),
+    NamedColor(name: "Khaki", red: 0.941176, green: 0.901961, blue: 0.549020),
+    NamedColor(name: "Lavender", red: 0.901961, green: 0.901961, blue: 0.980392),
+    NamedColor(name: "Lavender Blush", red: 1.000000, green: 0.941176, blue: 0.960784),
+    NamedColor(name: "Lawn Green", red: 0.486275, green: 0.988235, blue: 0.000000),
+    NamedColor(name: "Lemon Chiffon", red: 1.000000, green: 0.980392, blue: 0.803922),
+    NamedColor(name: "Light Blue", red: 0.678431, green: 0.847059, blue: 0.901961),
+    NamedColor(name: "Light Coral", red: 0.941176, green: 0.501961, blue: 0.501961),
+    NamedColor(name: "Light Cyan", red: 0.878431, green: 1.000000, blue: 1.000000),
+    NamedColor(name: "Light Goldenrod Yellow", red: 0.980392, green: 0.980392, blue: 0.823529),
+    NamedColor(name: "Light Gray", red: 0.827451, green: 0.827451, blue: 0.827451),
+    NamedColor(name: "Light Green", red: 0.564706, green: 0.933333, blue: 0.564706),
+    NamedColor(name: "Light Grey", red: 0.827451, green: 0.827451, blue: 0.827451),
+    NamedColor(name: "Light Pink", red: 1.000000, green: 0.713725, blue: 0.756863),
+    NamedColor(name: "Light Salmon", red: 1.000000, green: 0.627451, blue: 0.478431),
+    NamedColor(name: "Light Sea Green", red: 0.125490, green: 0.698039, blue: 0.666667),
+    NamedColor(name: "Light Sky Blue", red: 0.529412, green: 0.807843, blue: 0.980392),
+    NamedColor(name: "Light Slate Gray", red: 0.466667, green: 0.533333, blue: 0.600000),
+    NamedColor(name: "Light Slate Grey", red: 0.466667, green: 0.533333, blue: 0.600000),
+    NamedColor(name: "Light Steel Blue", red: 0.690196, green: 0.768627, blue: 0.870588),
+    NamedColor(name: "Light Yellow", red: 1.000000, green: 1.000000, blue: 0.878431),
+    NamedColor(name: "Lime", red: 0.000000, green: 1.000000, blue: 0.000000),
+    NamedColor(name: "Lime Green", red: 0.196078, green: 0.803922, blue: 0.196078),
+    NamedColor(name: "Linen", red: 0.980392, green: 0.941176, blue: 0.901961),
+    NamedColor(name: "Magenta", red: 1.000000, green: 0.000000, blue: 1.000000),
+    NamedColor(name: "Maroon", red: 0.501961, green: 0.000000, blue: 0.000000),
+    NamedColor(name: "Medium Aquamarine", red: 0.400000, green: 0.803922, blue: 0.666667),
+    NamedColor(name: "Medium Blue", red: 0.000000, green: 0.000000, blue: 0.803922),
+    NamedColor(name: "Medium Orchid", red: 0.729412, green: 0.333333, blue: 0.827451),
+    NamedColor(name: "Medium Purple", red: 0.576471, green: 0.439216, blue: 0.858824),
+    NamedColor(name: "Medium Sea Green", red: 0.235294, green: 0.701961, blue: 0.443137),
+    NamedColor(name: "Medium Slate Blue", red: 0.482353, green: 0.407843, blue: 0.933333),
+    NamedColor(name: "Medium Spring Green", red: 0.000000, green: 0.980392, blue: 0.603922),
+    NamedColor(name: "Medium Turquoise", red: 0.282353, green: 0.819608, blue: 0.800000),
+    NamedColor(name: "Medium Violet Red", red: 0.780392, green: 0.082353, blue: 0.521569),
+    NamedColor(name: "Midnight Blue", red: 0.098039, green: 0.098039, blue: 0.439216),
+    NamedColor(name: "Mint Cream", red: 0.960784, green: 1.000000, blue: 0.980392),
+    NamedColor(name: "Misty Rose", red: 1.000000, green: 0.894118, blue: 0.882353),
+    NamedColor(name: "Moccasin", red: 1.000000, green: 0.894118, blue: 0.709804),
+    NamedColor(name: "Navajo White", red: 1.000000, green: 0.870588, blue: 0.678431),
+    NamedColor(name: "Navy", red: 0.000000, green: 0.000000, blue: 0.501961),
+    NamedColor(name: "Old Lace", red: 0.992157, green: 0.960784, blue: 0.901961),
+    NamedColor(name: "Olive", red: 0.501961, green: 0.501961, blue: 0.000000),
+    NamedColor(name: "Olive Drab", red: 0.419608, green: 0.556863, blue: 0.137255),
+    NamedColor(name: "Orange", red: 1.000000, green: 0.647059, blue: 0.000000),
+    NamedColor(name: "Orange Red", red: 1.000000, green: 0.270588, blue: 0.000000),
+    NamedColor(name: "Orchid", red: 0.854902, green: 0.439216, blue: 0.839216),
+    NamedColor(name: "Pale Goldenrod", red: 0.933333, green: 0.909804, blue: 0.666667),
+    NamedColor(name: "Pale Green", red: 0.596078, green: 0.984314, blue: 0.596078),
+    NamedColor(name: "Pale Turquoise", red: 0.686275, green: 0.933333, blue: 0.933333),
+    NamedColor(name: "Pale Violet Red", red: 0.858824, green: 0.439216, blue: 0.576471),
+    NamedColor(name: "Papaya Whip", red: 1.000000, green: 0.937255, blue: 0.835294),
+    NamedColor(name: "Peach Puff", red: 1.000000, green: 0.854902, blue: 0.725490),
+    NamedColor(name: "Peru", red: 0.803922, green: 0.521569, blue: 0.247059),
+    NamedColor(name: "Pink", red: 1.000000, green: 0.752941, blue: 0.796078),
+    NamedColor(name: "Plum", red: 0.866667, green: 0.627451, blue: 0.866667),
+    NamedColor(name: "Powder Blue", red: 0.690196, green: 0.878431, blue: 0.901961),
+    NamedColor(name: "Purple", red: 0.501961, green: 0.000000, blue: 0.501961),
+    NamedColor(name: "Rebecca Purple", red: 0.400000, green: 0.200000, blue: 0.600000),
+    NamedColor(name: "Red", red: 1.000000, green: 0.000000, blue: 0.000000),
+    NamedColor(name: "Rosy Brown", red: 0.737255, green: 0.560784, blue: 0.560784),
+    NamedColor(name: "Royal Blue", red: 0.254902, green: 0.411765, blue: 0.882353),
+    NamedColor(name: "Saddle Brown", red: 0.545098, green: 0.270588, blue: 0.074510),
+    NamedColor(name: "Salmon", red: 0.980392, green: 0.501961, blue: 0.447059),
+    NamedColor(name: "Sandy Brown", red: 0.956863, green: 0.643137, blue: 0.376471),
+    NamedColor(name: "Sea Green", red: 0.180392, green: 0.545098, blue: 0.341176),
+    NamedColor(name: "Sea Shell", red: 1.000000, green: 0.960784, blue: 0.933333),
+    NamedColor(name: "Sienna", red: 0.627451, green: 0.321569, blue: 0.176471),
+    NamedColor(name: "Silver", red: 0.752941, green: 0.752941, blue: 0.752941),
+    NamedColor(name: "Sky Blue", red: 0.529412, green: 0.807843, blue: 0.921569),
+    NamedColor(name: "Slate Blue", red: 0.415686, green: 0.352941, blue: 0.803922),
+    NamedColor(name: "Slate Gray", red: 0.439216, green: 0.501961, blue: 0.564706),
+    NamedColor(name: "Slate Grey", red: 0.439216, green: 0.501961, blue: 0.564706),
+    NamedColor(name: "Snow", red: 1.000000, green: 0.980392, blue: 0.980392),
+    NamedColor(name: "Spring Green", red: 0.000000, green: 1.000000, blue: 0.498039),
+    NamedColor(name: "Steel Blue", red: 0.274510, green: 0.509804, blue: 0.705882),
+    NamedColor(name: "Tan", red: 0.823529, green: 0.705882, blue: 0.549020),
+    NamedColor(name: "Teal", red: 0.000000, green: 0.501961, blue: 0.501961),
+    NamedColor(name: "Thistle", red: 0.847059, green: 0.749020, blue: 0.847059),
+    NamedColor(name: "Tomato", red: 1.000000, green: 0.388235, blue: 0.278431),
+    NamedColor(name: "Turquoise", red: 0.250980, green: 0.878431, blue: 0.815686),
+    NamedColor(name: "Violet", red: 0.933333, green: 0.509804, blue: 0.933333),
+    NamedColor(name: "Wheat", red: 0.960784, green: 0.870588, blue: 0.701961),
+    NamedColor(name: "White", red: 1.000000, green: 1.000000, blue: 1.000000),
+    NamedColor(name: "White Smoke", red: 0.960784, green: 0.960784, blue: 0.960784),
+    NamedColor(name: "Yellow", red: 1.000000, green: 1.000000, blue: 0.000000),
+    NamedColor(name: "Yellow Green", red: 0.603922, green: 0.803922, blue: 0.196078),
+  ]
+
+  private static let namedColorLabPalette: [(name: String, lab: LabColor)] = namedColorPalette.map { color in
+    let lab = labColor(red: color.red, green: color.green, blue: color.blue)
+    return (name: color.name, lab: lab)
+  }
+
+  private static func closestNamedColorName(for color: NSColor) -> String? {
+    guard !namedColorLabPalette.isEmpty else {
+      return nil
+    }
+    guard let blended = opaqueDeviceRGBColor(for: color) else {
+      return nil
+    }
+
+    let targetLab = labColor(
+      red: blended.redComponent,
+      green: blended.greenComponent,
+      blue: blended.blueComponent
+    )
+
+    var closestName: String?
+    var bestDistance = Double.greatestFiniteMagnitude
+
+    for candidate in namedColorLabPalette {
+      let distance = deltaE76(targetLab, candidate.lab)
+      if distance < bestDistance {
+        bestDistance = distance
+        closestName = candidate.name
+      }
+    }
+
+    return closestName
+  }
+
+  private static func labColor(red: Double, green: Double, blue: Double) -> LabColor {
+    let r = srgbToLinear(red)
+    let g = srgbToLinear(green)
+    let b = srgbToLinear(blue)
+
+    let x = (0.412_456_4 * r) + (0.357_576_1 * g) + (0.180_437_5 * b)
+    let y = (0.212_672_9 * r) + (0.715_152_2 * g) + (0.072_175 * b)
+    let z = (0.019_333_9 * r) + (0.119_192 * g) + (0.950_304_1 * b)
+
+    let whiteX = 0.950_47
+    let whiteY = 1.0
+    let whiteZ = 1.088_83
+
+    let fx = labPivot(x / whiteX)
+    let fy = labPivot(y / whiteY)
+    let fz = labPivot(z / whiteZ)
+
+    return LabColor(
+      l: max(0, (116 * fy) - 16),
+      a: 500 * (fx - fy),
+      b: 200 * (fy - fz)
+    )
+  }
+
+  private static func deltaE76(_ lhs: LabColor, _ rhs: LabColor) -> Double {
+    let dl = lhs.l - rhs.l
+    let da = lhs.a - rhs.a
+    let db = lhs.b - rhs.b
+    return sqrt((dl * dl) + (da * da) + (db * db))
+  }
+
+  private static func srgbToLinear(_ component: Double) -> Double {
+    let value = clamp(component)
+    if value <= 0.040_45 {
+      return value / 12.92
+    }
+    return pow((value + 0.055) / 1.055, 2.4)
+  }
+
+  private static func labPivot(_ value: Double) -> Double {
+    let epsilon = 216.0 / 24_389.0
+    let kappa = 24_389.0 / 27.0
+    if value > epsilon {
+      return pow(value, 1.0 / 3.0)
+    }
+    return ((kappa * value) + 16) / 116
+  }
+
+  private static func opaqueDeviceRGBColor(for color: NSColor) -> NSColor? {
     guard var rgb = color.usingColorSpace(.deviceRGB) else {
-      return .labelColor
+      return nil
     }
 
     if rgb.alphaComponent < 1,
@@ -743,6 +995,14 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
       let green = (rgb.greenComponent * alpha) + (windowBackground.greenComponent * (1 - alpha))
       let blue = (rgb.blueComponent * alpha) + (windowBackground.blueComponent * (1 - alpha))
       rgb = NSColor(deviceRed: red, green: green, blue: blue, alpha: 1)
+    }
+
+    return rgb
+  }
+
+  private static func contrastingTextColor(for color: NSColor) -> NSColor {
+    guard let rgb = opaqueDeviceRGBColor(for: color) else {
+      return .labelColor
     }
 
     let relativeLuminance = { (channel: CGFloat) -> CGFloat in

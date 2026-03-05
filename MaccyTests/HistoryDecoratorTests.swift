@@ -224,6 +224,16 @@ class HistoryItemDecoratorTests: XCTestCase {
     assertColorsEqual(lightColorDecorator.shelfContentForegroundColor!, .black)
   }
 
+  func testShelfNamedColorNearestMatch() {
+    let itemDecorator = historyItemDecorator("#F5AB82")
+    XCTAssertEqual(itemDecorator.shelfNamedColorName, "Light Salmon")
+  }
+
+  func testShelfNamedColorExactMatch() {
+    let itemDecorator = historyItemDecorator("rgb(255, 0, 0)")
+    XCTAssertEqual(itemDecorator.shelfNamedColorName, "Red")
+  }
+
   private func historyItemDecorator(
     _ value: String?,
     application: String? = "com.apple.finder"

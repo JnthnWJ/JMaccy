@@ -905,7 +905,13 @@ private struct ShelfCardView: View {
       VStack(spacing: 0) {
         HStack(alignment: .top, spacing: 8) {
           VStack(alignment: .leading, spacing: 2) {
-            Text(LocalizedStringKey(item.shelfTypeKey))
+            Group {
+              if let shelfNamedColorName = item.shelfNamedColorName {
+                Text(verbatim: shelfNamedColorName)
+              } else {
+                Text(LocalizedStringKey(item.shelfTypeKey))
+              }
+            }
               .font(.headline)
               .lineLimit(1)
             Text(item.shelfRelativeTime)
