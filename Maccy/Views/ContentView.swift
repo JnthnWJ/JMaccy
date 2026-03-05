@@ -891,6 +891,7 @@ private struct ShelfCardView: View {
     let hasImage = item.hasImage
     let thumbnailImage = item.thumbnailImage
     let cardTitle = item.title.isEmpty ? item.text.shortened(to: 80) : item.title.shortened(to: 80)
+    let cardBodyText = item.shelfExcerpt.isEmpty ? cardTitle : item.shelfExcerpt
 
     Button {
       onCardTap(item.id)
@@ -942,16 +943,10 @@ private struct ShelfCardView: View {
               .clipped()
           } else {
             VStack(alignment: .leading, spacing: 8) {
-              Text(cardTitle)
-                .font(.headline)
-                .lineLimit(2)
-
-              if !item.shelfExcerpt.isEmpty {
-                Text(item.shelfExcerpt)
-                  .font(.body)
-                  .foregroundStyle(.secondary)
-                  .lineLimit(5)
-              }
+              Text(cardBodyText)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .lineLimit(7)
 
               Spacer(minLength: 0)
             }
