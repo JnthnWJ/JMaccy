@@ -130,7 +130,7 @@ struct PinsSettingsPane: View {
         TableColumn(Text("Key", tableName: "PinsSettings")) { item in
           PinPickerView(item: item, availablePins: availablePins)
             .onChange(of: item.pin) {
-              availablePins = HistoryItem.availablePins
+              availablePins = HistoryItem.availablePins(in: items)
             }
         }
         .width(60)
@@ -144,7 +144,7 @@ struct PinsSettingsPane: View {
         }
       }
       .onAppear {
-        availablePins = HistoryItem.availablePins
+        availablePins = HistoryItem.availablePins(in: items)
       }
       .onDeleteCommand {
         guard let selection,
