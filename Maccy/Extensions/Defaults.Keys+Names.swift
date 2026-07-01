@@ -43,6 +43,7 @@ extension Defaults.Keys {
   static let popupPosition = Key<PopupPosition>("popupPosition", default: .cursor)
   static let popupLayoutMode = Key<PopupLayoutMode>("popupLayoutMode", default: .list)
   static let popupScreen = Key<Int>("popupScreen", default: 0)
+  static let openPreviewAutomatically = Key<Bool>("openPreviewAutomatically", default: true)
   static let previewDelay = Key<Int>("previewDelay", default: 1500)
   static let removeFormattingByDefault = Key<Bool>("removeFormattingByDefault", default: false)
   static let searchMode = Key<Search.Mode>("searchMode", default: .exact)
