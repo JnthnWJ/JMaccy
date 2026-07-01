@@ -44,6 +44,27 @@ enum ImageDownsampler {
     return original.rasterized(to: targetSize, scale: scale)
   }
 
+  /// Returns the pixel dimensions of the largest image encoded in `data` without decoding it.
+  static func pixelSize(of data: Data) -> NSSize? {
+    let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+    guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions),
+          CGImageSourceGetCount(source) > 0,
+          let properties = CGImageSourceCopyPropertiesAtIndex(
+            source, largestImageIndex(in: source), nil
+          ) as? [CFString: Any],
+          let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
+          let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue else {
+      return nil
+    }
+
+    // EXIF orientations 5-8 are rotated by 90°, so the displayed image has swapped dimensions.
+    let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+    if (5...8).contains(orientation) {
+      return NSSize(width: height, height: width)
+    }
+    return NSSize(width: width, height: height)
+  }
+
   private static func largestImageIndex(in source: CGImageSource) -> Int {
     var bestIndex = 0
     var bestPixelCount = 0

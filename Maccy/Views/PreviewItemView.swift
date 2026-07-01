@@ -72,6 +72,13 @@ struct PreviewItemView: View {
         }
       }
 
+      if item.hasImage, let pixelSize = item.item.imagePixelSize {
+        HStack(spacing: 3) {
+          Text("Dimensions", tableName: "PreviewItemView")
+          Text("\(Int(pixelSize.width))×\(Int(pixelSize.height))")
+        }
+      }
+
       HStack(spacing: 3) {
         Text("FirstCopyTime", tableName: "PreviewItemView")
         Text(item.item.firstCopiedAt, style: .date)

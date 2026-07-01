@@ -172,6 +172,15 @@ class HistoryItem {
     return NSImage(data: data)
   }
 
+  /// Pixel dimensions of the image content, read from its metadata without decoding it.
+  var imagePixelSize: NSSize? {
+    guard let data = imageData else {
+      return nil
+    }
+
+    return ImageDownsampler.pixelSize(of: data)
+  }
+
   var rtfData: Data? { contentData([.rtf]) }
   var rtf: NSAttributedString? {
     guard let data = rtfData else {
