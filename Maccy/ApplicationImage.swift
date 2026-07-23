@@ -81,6 +81,7 @@ class ApplicationImage {
               source.cancel()
               self.image = nil
               self.headerHue = nil
+              self.lastChecked = nil
             } else if event.contains(.write) {
               // File was modified. Fetch new icon
               print("Modified", appURL.path)
