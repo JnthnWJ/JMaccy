@@ -219,7 +219,7 @@ struct KeyHandlingView<Content: View>: View {
       appState.togglePin()
       return true
     case .selectCurrentItem:
-      appState.select()
+      appState.select(flags: .currentModifierFlags)
       return true
     case .moveToLeft:
       guard shelfMode else {
@@ -283,9 +283,10 @@ struct KeyHandlingView<Content: View>: View {
 
     if let item = appState.history.pressedShortcutItem {
       appState.navigator.select(item: item)
+      let modifierFlags = NSEvent.ModifierFlags.currentModifierFlags
       Task {
         try? await Task.sleep(for: .milliseconds(50))
-        appState.history.select(item)
+        appState.history.select(item, flags: modifierFlags)
       }
       return true
     }

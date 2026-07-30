@@ -444,7 +444,7 @@ private struct ShelfTopStripView: View {
                 query: $searchQuery,
                 focused: searchFocused
               ) {
-                appState.select()
+                appState.select(flags: .currentModifierFlags)
               }
               .focused($searchFocused)
               .frame(width: expandedSearchWidth, height: 40)
@@ -727,8 +727,9 @@ private struct ShelfCarouselView: View {
     guard let tappedItem = items.first(where: { $0.id == id }) else { return }
 
     if appState.navigator.leadSelection == id {
+      let flags = NSEvent.ModifierFlags.currentModifierFlags
       Task {
-        appState.history.select(tappedItem)
+        appState.history.select(tappedItem, flags: flags)
       }
       return
     }
