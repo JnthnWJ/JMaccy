@@ -21,7 +21,7 @@ class Storage {
     try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
 
     #if DEBUG
-    let isTesting = CommandLine.arguments.contains("enable-testing")
+    let isTesting = AppDelegate.isTesting
     #else
     let isTesting = false
     #endif

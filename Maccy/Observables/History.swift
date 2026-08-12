@@ -743,7 +743,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       return
     }
 
-    Clipboard.shared.copy(item.copyableImageText)
+    Clipboard.shared.copyInMaccy(item.copyableImageText)
   }
 
   @MainActor

@@ -6,5 +6,8 @@
 "UnpinKey" = "Pritisnite {pinKey} za otkvačivanje.";
 "DeleteKey" = "Pritisnite {deleteKey} za brisanje.";
 "PreviewKey" = "Pritisnite {previewKey} za uključivanje/isključivanje pregleda.";
+"DeleteKey" = "Izbriši pomoću tipki {deleteKey}.";
+"OpenPreview" = "Pritisnite {previewKey} za prikaz pregleda.";
+"ClosePreview" = "Pritisnite {previewKey} za skrivanje pregleda.";
 "Dimensions" = "Dimenzije:";
 "CopyExtractedText" = "Kopiraj izdvojeni tekst.";
