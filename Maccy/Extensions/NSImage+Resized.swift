@@ -1,28 +1,106 @@
 import AppKit
+import ImageIO
 
-// Based on https://stackoverflow.com/questions/73062803/resizing-nsimage-keeping-aspect-ratio-reducing-the-image-size-while-trying-to-sc.
-extension NSImage {
-  func resized(to newSize: NSSize) -> NSImage {
-    let ratioX = newSize.width / size.width
-    let ratioY = newSize.height / size.height
-    let ratio = ratioX < ratioY ? ratioX : ratioY
-    let newHeight = size.height * ratio
-    let newWidth = size.width * ratio
-    let newSize = NSSize(width: newWidth, height: newHeight)
-
-    // Don't attempt to size up.
-    if newSize.height >= size.height {
-      return self
+enum ImageDownsampler {
+  /// Returns a copy of the image encoded in `data` that fits into `bounds` (in points).
+  ///
+  /// The result is decoded directly at the target pixel size with ImageIO, so it doesn't keep
+  /// the full-size source image alive the way a drawing-handler based `NSImage` would.
+  /// Images that already fit are returned as-is. Safe to call off the main thread.
+  static func downsample(_ data: Data, toFit bounds: NSSize, scale: CGFloat) -> NSImage? {
+    guard let original = NSImage(data: data) else {
+      return nil
     }
 
-    return NSImage(size: newSize, flipped: false) { destRect in
-      if let context = NSGraphicsContext.current {
-        context.imageInterpolation = .high
-        self.draw(in: destRect, from: NSRect.zero, operation: .copy, fraction: 1)
+    let size = original.size
+    guard size.width > 0, size.height > 0 else {
+      return nil
+    }
+
+    let ratio = min(bounds.width / size.width, bounds.height / size.height)
+    // Don't attempt to size up.
+    guard ratio < 1 else {
+      return original
+    }
+
+    let targetSize = NSSize(width: size.width * ratio, height: size.height * ratio)
+    let maxPixelSize = max(1, Int((max(targetSize.width, targetSize.height) * max(scale, 1)).rounded(.up)))
+
+    let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+    if let source = CGImageSourceCreateWithData(data as CFData, sourceOptions),
+       CGImageSourceGetCount(source) > 0 {
+      let thumbnailOptions = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceShouldCacheImmediately: true,
+        kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
+      ] as CFDictionary
+
+      if let cgImage = CGImageSourceCreateThumbnailAtIndex(source, largestImageIndex(in: source), thumbnailOptions) {
+        return NSImage(cgImage: cgImage, size: targetSize)
+      }
+    }
+
+    return original.rasterized(to: targetSize, scale: scale)
+  }
+
+  private static func largestImageIndex(in source: CGImageSource) -> Int {
+    var bestIndex = 0
+    var bestPixelCount = 0
+
+    for index in 0..<CGImageSourceGetCount(source) {
+      guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any],
+            let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
+            let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue else {
+        continue
       }
 
-      return true
+      if width * height > bestPixelCount {
+        bestPixelCount = width * height
+        bestIndex = index
+      }
     }
+
+    return bestIndex
+  }
+}
+
+extension NSImage {
+  /// Draws the image into a standalone bitmap of the given size, dropping any reference to the source.
+  func rasterized(to newSize: NSSize, scale: CGFloat) -> NSImage? {
+    let pixelsWide = max(1, Int((newSize.width * max(scale, 1)).rounded()))
+    let pixelsHigh = max(1, Int((newSize.height * max(scale, 1)).rounded()))
+
+    guard let bitmap = NSBitmapImageRep(
+      bitmapDataPlanes: nil,
+      pixelsWide: pixelsWide,
+      pixelsHigh: pixelsHigh,
+      bitsPerSample: 8,
+      samplesPerPixel: 4,
+      hasAlpha: true,
+      isPlanar: false,
+      colorSpaceName: .deviceRGB,
+      bytesPerRow: 0,
+      bitsPerPixel: 0
+    ) else {
+      return nil
+    }
+    bitmap.size = newSize
+
+    NSGraphicsContext.saveGraphicsState()
+    defer { NSGraphicsContext.restoreGraphicsState() }
+    guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+      return nil
+    }
+
+    NSGraphicsContext.current = context
+    context.imageInterpolation = .high
+    draw(in: NSRect(origin: .zero, size: newSize), from: .zero, operation: .copy, fraction: 1)
+    context.flushGraphics()
+
+    let image = NSImage(size: newSize)
+    image.addRepresentation(bitmap)
+    return image
   }
 
   func prominentHue(sampleSize: Int = 32) -> Double? {

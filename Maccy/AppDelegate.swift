@@ -23,7 +23,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private var statusItemVisibilityObserver: NSKeyValueObservation?
-  private var sleepObservers: [NSObjectProtocol] = []
 
   func applicationWillFinishLaunching(_ notification: Notification) { // swiftlint:disable:this function_body_length
     #if DEBUG
@@ -40,7 +39,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Bridge FloatingPanel via AppDelegate.
     AppState.shared.appDelegate = self
-    SyncEncryptionManager.shared.bootstrap()
+    LegacyVaultMigration().runIfNeeded()
 
     Clipboard.shared.onNewCopy { History.shared.handleNewClipboardCopy($0) }
     Clipboard.shared.start()
@@ -91,28 +90,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.appearsDisabled = isStatusItemDisabled
       }
     }
-
-    let notificationCenter = NSWorkspace.shared.notificationCenter
-    sleepObservers = [
-      notificationCenter.addObserver(
-        forName: NSWorkspace.willSleepNotification,
-        object: nil,
-        queue: .main
-      ) { _ in
-        Task { @MainActor in
-          SyncEncryptionManager.shared.handleSystemSleep()
-        }
-      },
-      notificationCenter.addObserver(
-        forName: NSWorkspace.screensDidSleepNotification,
-        object: nil,
-        queue: .main
-      ) { _ in
-        Task { @MainActor in
-          SyncEncryptionManager.shared.handleSystemSleep()
-        }
-      }
-    ]
   }
 
   func applicationDidFinishLaunching(_ aNotification: Notification) {
@@ -135,7 +112,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
-    SyncEncryptionManager.shared.lock(reason: .manual)
     if Defaults[.clearOnQuit] {
       AppState.shared.history.clear()
     }

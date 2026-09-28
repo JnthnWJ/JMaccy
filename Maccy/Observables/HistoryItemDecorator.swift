@@ -8,8 +8,18 @@ import SwiftUI
 
 @Observable
 class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
-  private static let thumbnailCache = NSCache<NSString, NSImage>()
-  private static let previewCache = NSCache<NSString, NSImage>()
+  // Bounded by decoded bitmap size so that browsing many large screenshots can't grow memory without limit.
+  private static let thumbnailCache: NSCache<NSString, NSImage> = {
+    let cache = NSCache<NSString, NSImage>()
+    cache.totalCostLimit = 48 * 1024 * 1024
+    return cache
+  }()
+  private static let previewCache: NSCache<NSString, NSImage> = {
+    let cache = NSCache<NSString, NSImage>()
+    cache.totalCostLimit = 96 * 1024 * 1024
+    cache.countLimit = 8
+    return cache
+  }()
 
   enum ShelfCardType {
     case text
@@ -85,7 +95,7 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     return url.deletingPathExtension().lastPathComponent
   }
 
-  var hasImage: Bool { item.image != nil }
+  var hasImage: Bool { item.hasImageContent }
 
   var previewImageGenerationTask: Task<(), Error>?
   var thumbnailImageGenerationTask: Task<(), Error>?
@@ -215,43 +225,46 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
 
   @MainActor
   func ensureThumbnailImage() {
-    guard item.image != nil else {
+    guard thumbnailImage == nil, thumbnailImageGenerationTask == nil else {
       return
     }
-    guard thumbnailImage == nil else {
-      return
-    }
-    guard thumbnailImageGenerationTask == nil else {
+    guard let data = item.imageData else {
       return
     }
 
+    let size = Self.thumbnailImageSize
+    let scale = Self.backingScaleFactor
     thumbnailImageGenerationTask = Task { @MainActor [weak self] in
-      defer {
-        self?.thumbnailImageGenerationTask = nil
+      let image = await Self.downsampleInBackground(data, toFit: size, scale: scale)
+      // A cancelled task was replaced by cleanupImages(), so it must not touch the current state.
+      guard !Task.isCancelled, let self else {
+        return
       }
 
-      self?.generateThumbnailImage()
+      self.thumbnailImageGenerationTask = nil
+      self.storeThumbnailImage(image)
     }
   }
 
   @MainActor
   func ensurePreviewImage() {
-    guard item.image != nil else {
+    guard previewImage == nil, previewImageGenerationTask == nil else {
       return
     }
-    guard previewImage == nil else {
-      return
-    }
-    guard previewImageGenerationTask == nil else {
+    guard let data = item.imageData else {
       return
     }
 
+    let size = Self.previewImageSize
+    let scale = Self.backingScaleFactor
     previewImageGenerationTask = Task { @MainActor [weak self] in
-      defer {
-        self?.previewImageGenerationTask = nil
+      let image = await Self.downsampleInBackground(data, toFit: size, scale: scale)
+      guard !Task.isCancelled, let self else {
+        return
       }
 
-      self?.generatePreviewImage()
+      self.previewImageGenerationTask = nil
+      self.storePreviewImage(image)
     }
   }
 
@@ -274,40 +287,63 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     previewImageGenerationTask = nil
     Self.thumbnailCache.removeObject(forKey: cacheKey)
     Self.previewCache.removeObject(forKey: cacheKey)
-    thumbnailImage?.recache()
-    previewImage?.recache()
+    RuntimeDiagnostics.log(
+      "image cleanup item=\(id.uuidString) hadThumbnail=\(thumbnailImage != nil) hadPreview=\(previewImage != nil)"
+    )
     thumbnailImage = nil
     previewImage = nil
   }
 
   @MainActor
-  private func generateThumbnailImage() {
-    guard let image = item.image else {
-      return
-    }
-
-    thumbnailImage = image.resized(to: HistoryItemDecorator.thumbnailImageSize)
-    if let thumbnailImage {
-      Self.thumbnailCache.setObject(thumbnailImage, forKey: cacheKey)
-    }
-  }
-
-  @MainActor
-  private func generatePreviewImage() {
-    guard let image = item.image else {
-      return
-    }
-
-    previewImage = image.resized(to: HistoryItemDecorator.previewImageSize)
-    if let previewImage {
-      Self.previewCache.setObject(previewImage, forKey: cacheKey)
-    }
-  }
-
-  @MainActor
   func sizeImages() {
-    generatePreviewImage()
-    generateThumbnailImage()
+    guard let data = item.imageData else {
+      return
+    }
+
+    let scale = Self.backingScaleFactor
+    storePreviewImage(ImageDownsampler.downsample(data, toFit: Self.previewImageSize, scale: scale))
+    storeThumbnailImage(ImageDownsampler.downsample(data, toFit: Self.thumbnailImageSize, scale: scale))
+  }
+
+  @MainActor
+  private func storeThumbnailImage(_ image: NSImage?) {
+    thumbnailImage = image
+    if let image {
+      Self.thumbnailCache.setObject(image, forKey: cacheKey, cost: Self.estimatedCost(of: image))
+    }
+  }
+
+  @MainActor
+  private func storePreviewImage(_ image: NSImage?) {
+    previewImage = image
+    if let image {
+      Self.previewCache.setObject(image, forKey: cacheKey, cost: Self.estimatedCost(of: image))
+    }
+  }
+
+  private static var backingScaleFactor: CGFloat {
+    NSScreen.forPopup?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+  }
+
+  private static func downsampleInBackground(_ data: Data, toFit size: NSSize, scale: CGFloat) async -> NSImage? {
+    RuntimeDiagnostics.log(
+      "image downsample sourceBytes=\(RuntimeDiagnostics.format(bytes: data.count)) target=\(Int(size.width))x\(Int(size.height))"
+    )
+    return await Task.detached(priority: .userInitiated) {
+      ImageDownsampler.downsample(data, toFit: size, scale: scale)
+    }.value
+  }
+
+  private static func estimatedCost(of image: NSImage) -> Int {
+    let pixelCount = image.representations.reduce(0) { total, representation in
+      total + max(representation.pixelsWide, 0) * max(representation.pixelsHigh, 0)
+    }
+    if pixelCount > 0 {
+      return pixelCount * 4
+    }
+
+    // Fall back to the point size at 2x for representations that don't report pixel dimensions.
+    return Int(image.size.width * image.size.height * 4 * 4)
   }
 
   func highlight(_ query: String, _ ranges: [Range<String.Index>]) {
@@ -347,11 +383,15 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     }
   }
 
+  // The onChange closures are stored by the item's observation registrar until the property changes,
+  // so they must not retain the decorator: otherwise every decorator ever created for an item
+  // (History.load() creates a fresh set) stays alive, keeps its images, and re-runs on every change.
   private func synchronizeItemPin() {
     _ = withObservationTracking {
       item.pin
-    } onChange: {
-      DispatchQueue.main.async {
+    } onChange: { [weak self] in
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
         if let pin = self.item.pin {
           self.shortcuts = KeyShortcut.create(character: pin)
         }
@@ -363,9 +403,12 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
   private func synchronizeItemTitle() {
     _ = withObservationTracking {
       item.title
-    } onChange: {
-      DispatchQueue.main.async {
-        self.title = self.item.title
+    } onChange: { [weak self] in
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        if self.title != self.item.title {
+          self.title = self.item.title
+        }
         self.synchronizeItemTitle()
       }
     }

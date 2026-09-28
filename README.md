@@ -3,7 +3,7 @@
 
 # JMaccy
 
-JMaccy is a fork of Maccy with a new coat of paint and a few new features: a vertical Shelf layout, iCloud history sync, and tagging for organization.
+JMaccy is a fork of Maccy with a new coat of paint and a few new features: a vertical Shelf layout and tagging for organization.
 
 
 ## Features
@@ -17,15 +17,6 @@ JMaccy adds a Shelf layout that presents clipboard history as a more structured,
 * Includes richer card-like metadata and a focused item preview workflow
 
 Note: Shelf layout currently requires macOS 26+.
-
-### iCloud Clipboard Sync
-
-Clipboard history can sync across your devices through iCloud.
-
-* Enable it in `Preferences -> Storage -> Sync & Encryption`
-* Optional encryption for local + iCloud synced history
-* Sync scope options: all items, pinned items only, or text only
-* Tags are synced across devices as well
 
 ### Tagging
 

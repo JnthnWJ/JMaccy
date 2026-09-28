@@ -121,10 +121,31 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
   @MainActor
   func load() async throws {
+    let purgedContentCount = Storage.shared.purgeOrphanedContents()
+    if purgedContentCount > 0 {
+      logger.info("Purged \(purgedContentCount) orphaned history contents")
+    }
+
     let descriptor = FetchDescriptor<HistoryItem>()
     let results = try Storage.shared.context.fetch(descriptor)
     backfillMissingCustomTitles(for: results)
-    all = sorter.sort(results).map { HistoryItemDecorator($0) }
+
+    // Reuse decorators for items that are still the same model instance. load() runs after every
+    // sync pass, and rebuilding every decorator throws away their images and invalidates every view.
+    var existingDecorators: [ObjectIdentifier: HistoryItemDecorator] = [:]
+    for decorator in all {
+      existingDecorators[ObjectIdentifier(decorator.item)] = decorator
+    }
+    all = sorter.sort(results).map { item in
+      if let decorator = existingDecorators.removeValue(forKey: ObjectIdentifier(item)) {
+        if decorator.title != item.title {
+          decorator.title = item.title
+        }
+        return decorator
+      }
+      return HistoryItemDecorator(item)
+    }
+    existingDecorators.values.forEach(cleanup)
     loadTags()
 
     limitHistorySize(to: Defaults[.size])
@@ -135,24 +156,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     Task {
       AppState.shared.popup.needsResize = true
     }
-  }
-
-  @MainActor
-  func discardRuntimeReferences() {
-    AppState.shared.navigator.selectWithoutScrolling(item: nil, footerItem: nil)
-    pasteStack = nil
-
-    all.forEach(cleanup)
-    all.removeAll()
-    items.removeAll()
-    sessionLog.removeAll()
-    tags.removeAll()
-
-    if selectedTagID != nil {
-      selectedTagID = nil
-    }
-
-    AppState.shared.popup.needsResize = true
   }
 
   @MainActor
@@ -169,7 +172,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     Storage.shared.context.insert(item)
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
-    SyncEncryptionManager.shared.handleHistoryMutation()
   }
 
   @discardableResult
@@ -186,7 +188,10 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     var removedItemIndex: Int?
     if let existingHistoryItem = findSimilarItem(item) {
       if isModified(item) == nil {
+        let replacedContents = item.contents
         item.contents = existingHistoryItem.contents
+        // The replaced contents would otherwise stay in the store as orphaned rows.
+        replacedContents.forEach { Storage.shared.context.delete($0) }
       }
       item.firstCopiedAt = existingHistoryItem.firstCopiedAt
       item.numberOfCopies += existingHistoryItem.numberOfCopies
@@ -238,7 +243,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     applyCurrentFilters()
     updateUnpinnedShortcuts()
     AppState.shared.popup.needsResize = true
-    SyncEncryptionManager.shared.handleHistoryMutation()
 
     return itemDecorator
   }
@@ -277,7 +281,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
         predicate: #Predicate { $0.pin == nil }
       )
       let storedItems = (try? Storage.shared.context.fetch(descriptor)) ?? []
-      let removedIDs = storedItems.map(\.id)
 
       all.filter(\.isUnpinned).forEach { cleanup($0) }
       all.removeAll(where: \.isUnpinned)
@@ -290,13 +293,10 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       }
       Storage.shared.context.processPendingChanges()
       try? Storage.shared.context.save()
-
-      SyncEncryptionManager.shared.recordDeletedItems(ids: removedIDs)
     }
 
     Clipboard.shared.clear()
     AppState.shared.popup.close()
-    SyncEncryptionManager.shared.handleHistoryMutation()
     Task {
       AppState.shared.popup.needsResize = true
     }
@@ -306,7 +306,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   func clearAll() {
     withLogging("Clearing all history") {
       let storedItems = (try? Storage.shared.context.fetch(FetchDescriptor<HistoryItem>())) ?? []
-      let removedIDs = storedItems.map(\.id)
 
       all.forEach { cleanup($0) }
       all.removeAll()
@@ -319,13 +318,10 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       }
       Storage.shared.context.processPendingChanges()
       try? Storage.shared.context.save()
-
-      SyncEncryptionManager.shared.recordDeletedItems(ids: removedIDs)
     }
 
     Clipboard.shared.clear()
     AppState.shared.popup.close()
-    SyncEncryptionManager.shared.handleHistoryMutation()
     Task {
       AppState.shared.popup.needsResize = true
     }
@@ -346,7 +342,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     guard !existingItems.isEmpty else { return }
 
     existingItems.forEach(cleanup)
-    let deletedIDs = existingItems.map(\.id)
 
     withLogging("Removing \(existingItems.count) history items") {
       for item in existingItems {
@@ -361,8 +356,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
     applyCurrentFilters()
     updateUnpinnedShortcuts()
-    SyncEncryptionManager.shared.recordDeletedItems(ids: deletedIDs)
-    SyncEncryptionManager.shared.handleHistoryMutation()
     Task {
       AppState.shared.popup.needsResize = true
     }
@@ -381,11 +374,12 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       NSPasteboard.PasteboardType.rtf.rawValue,
       NSPasteboard.PasteboardType.html.rawValue
     ]
-    item.item.contents.removeAll { removableTypes.contains($0.type) }
+    let plainTextContent = item.item.contents.first { $0.type == plainTextType }
+    removeContents(from: item.item) { removableTypes.contains($0.type) && $0 !== plainTextContent }
 
     if let data = newValue.data(using: .utf8) {
-      if let existingIndex = item.item.contents.firstIndex(where: { $0.type == plainTextType }) {
-        item.item.contents[existingIndex].value = data
+      if let plainTextContent {
+        plainTextContent.value = data
       } else {
         item.item.contents.append(
           HistoryItemContent(type: plainTextType, value: data)
@@ -403,7 +397,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     try? Storage.shared.context.save()
 
     applyCurrentFilters()
-    SyncEncryptionManager.shared.handleHistoryMutation()
     AppState.shared.popup.needsResize = true
 
     return true
@@ -431,7 +424,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     try? Storage.shared.context.save()
 
     applyCurrentFilters()
-    SyncEncryptionManager.shared.handleHistoryMutation()
     AppState.shared.popup.needsResize = true
 
     return true
@@ -454,7 +446,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       NSPasteboard.PasteboardType.jpeg.rawValue,
       NSPasteboard.PasteboardType.heic.rawValue
     ]
-    item.item.contents.removeAll { removableTypes.contains($0.type) }
+    removeContents(from: item.item) { removableTypes.contains($0.type) }
     item.item.contents.append(
       HistoryItemContent(type: type.rawValue, value: imageData)
     )
@@ -471,10 +463,20 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     try? Storage.shared.context.save()
 
     applyCurrentFilters()
-    SyncEncryptionManager.shared.handleHistoryMutation()
     AppState.shared.popup.needsResize = true
 
     return true
+  }
+
+  // Removing a content from the relationship only nullifies its `item`; the row itself (including
+  // any image data) stays in the store unless it's deleted explicitly.
+  @MainActor
+  private func removeContents(from item: HistoryItem, where shouldRemove: (HistoryItemContent) -> Bool) {
+    let removed = item.contents.filter(shouldRemove)
+    guard !removed.isEmpty else { return }
+
+    item.contents.removeAll(where: shouldRemove)
+    removed.forEach { Storage.shared.context.delete($0) }
   }
 
   @MainActor
@@ -523,7 +525,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     Task {
       searchQuery = ""
     }
-    SyncEncryptionManager.shared.recordProtectedActionCompleted()
   }
 
   @MainActor
@@ -563,7 +564,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     Task {
       searchQuery = ""
     }
-    SyncEncryptionManager.shared.recordProtectedActionCompleted()
   }
 
   func handlePasteStack() {
@@ -604,9 +604,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
           return
         }
       }
-      await MainActor.run {
-        SyncEncryptionManager.shared.recordProtectedActionCompleted()
-      }
     }
   }
 
@@ -641,7 +638,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     }
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
-    SyncEncryptionManager.shared.handleHistoryMutation()
   }
 
   @MainActor
@@ -686,7 +682,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     try? Storage.shared.context.save()
     loadTags()
     AppState.shared.popup.needsResize = true
-    SyncEncryptionManager.shared.handleHistoryMutation()
 
     return tag
   }
@@ -706,7 +701,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     try? Storage.shared.context.save()
     loadTags()
     AppState.shared.popup.needsResize = true
-    SyncEncryptionManager.shared.handleHistoryMutation()
 
     return true
   }
@@ -720,7 +714,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
     loadTags()
-    SyncEncryptionManager.shared.handleHistoryMutation()
     return true
   }
 
@@ -732,13 +725,11 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       selectedTagID = nil
     }
 
-    SyncEncryptionManager.shared.recordDeletedTag(id: id)
     Storage.shared.context.delete(tag)
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
     loadTags()
     applyCurrentFilters()
-    SyncEncryptionManager.shared.handleHistoryMutation()
     AppState.shared.popup.needsResize = true
   }
 
@@ -754,7 +745,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
     applyCurrentFilters()
-    SyncEncryptionManager.shared.handleHistoryMutation()
 
     return true
   }
@@ -767,7 +757,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
     applyCurrentFilters()
-    SyncEncryptionManager.shared.handleHistoryMutation()
   }
 
   @MainActor
@@ -777,7 +766,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     }
 
     Clipboard.shared.copy(item.copyableImageText)
-    SyncEncryptionManager.shared.recordProtectedActionCompleted()
   }
 
   @MainActor
@@ -793,7 +781,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     Task {
       searchQuery = ""
     }
-    SyncEncryptionManager.shared.recordProtectedActionCompleted()
   }
 
   @MainActor

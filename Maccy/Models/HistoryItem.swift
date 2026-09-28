@@ -95,9 +95,7 @@ class HistoryItem {
 
   func generateTitle() -> String {
     guard image == nil else {
-      Task {
-        self.performTextRecognition()
-      }
+      scheduleTextRecognition()
       return ""
     }
 
@@ -165,6 +163,11 @@ class HistoryItem {
     return data
   }
 
+  /// Cheap check for image content that doesn't decode the image.
+  var hasImageContent: Bool {
+    contentData([.tiff, .png, .jpeg, .heic]) != nil || universalClipboardImage
+  }
+
   var image: NSImage? {
     guard let data = imageData else {
       return nil
@@ -221,36 +224,62 @@ class HistoryItem {
       .compactMap { $0.value }
   }
 
-  private func performTextRecognition() {
-    guard let cgImage = image?.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+  // Text recognition can take seconds for large screenshots, so it runs off the main thread
+  // and only the resulting title is applied back on the main actor.
+  private func scheduleTextRecognition() {
+    guard let data = imageData else {
       return
     }
 
-    let requestHandler = VNImageRequestHandler(cgImage: cgImage)
-    let request = VNRecognizeTextRequest(completionHandler: recognizeTextHandler)
-    request.recognitionLevel = .fast
-
-    do {
-      try requestHandler.perform([request])
-    } catch {
-      print("Unable to perform the request: \(error).")
+    let itemID = id
+    RuntimeDiagnostics.log(
+      "ocr enqueue item=\(itemID.uuidString) imageBytes=\(RuntimeDiagnostics.format(bytes: data.count))"
+    )
+    Task { @MainActor [weak self] in
+      let recognizedText = await Task.detached(priority: .utility) {
+        Self.recognizeText(in: data, itemID: itemID)
+      }.value
+      self?.applyRecognizedText(recognizedText)
     }
   }
 
-  private func recognizeTextHandler(request: VNRequest, error: Error?) {
-    if let error {
+  @MainActor
+  private func applyRecognizedText(_ recognizedText: String?) {
+    guard let recognizedText, !isDeleted else {
+      return
+    }
+
+    // Don't clobber a title the user set while recognition was running.
+    if let customTitle, !customTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      return
+    }
+
+    title = recognizedText
+    RuntimeDiagnostics.log("ocr recognized item=\(id.uuidString) titleLength=\(recognizedText.count)")
+  }
+
+  private static func recognizeText(in data: Data, itemID: UUID) -> String? {
+    RuntimeDiagnostics.log("ocr start item=\(itemID.uuidString) imageBytes=\(RuntimeDiagnostics.format(bytes: data.count))")
+    guard let cgImage = NSImage(data: data)?.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+      RuntimeDiagnostics.log("ocr skip item=\(itemID.uuidString) reason=no-cg-image")
+      return nil
+    }
+
+    let request = VNRecognizeTextRequest()
+    request.recognitionLevel = .fast
+
+    do {
+      try VNImageRequestHandler(cgImage: cgImage).perform([request])
+    } catch {
+      RuntimeDiagnostics.log("ocr failed item=\(itemID.uuidString) error=\(error.localizedDescription)")
       print("Unable to perform the request: \(error).")
-      return
+      return nil
     }
 
-    guard let observations = request.results as? [VNRecognizedTextObservation] else {
-      return
+    let recognizedStrings = (request.results ?? []).compactMap { observation in
+      observation.topCandidates(1).first?.string
     }
-
-    let recognizedStrings = observations.compactMap { observation in
-      return observation.topCandidates(1).first?.string
-    }
-
-    self.title = recognizedStrings.joined(separator: "\n")
+    RuntimeDiagnostics.log("ocr complete item=\(itemID.uuidString) lines=\(recognizedStrings.count)")
+    return recognizedStrings.joined(separator: "\n")
   }
 }

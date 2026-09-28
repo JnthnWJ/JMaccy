@@ -1,5 +1,4 @@
 import AppKit
-import CloudKit
 import CryptoKit
 import Defaults
 import SwiftData
@@ -47,29 +46,6 @@ class HistoryTests: XCTestCase {
     let first = history.add(historyItem("foo"))
     let second = history.add(historyItem("bar"))
     XCTAssertEqual(history.items, [second, first])
-  }
-
-  func testActivatingEncryptedRuntimeClearsTransientStateBoundToOldContext() {
-    defer {
-      Storage.shared.activatePlainRuntime()
-    }
-
-    let item = history.add(historyItem("foo"))
-    let tag = history.createTag(name: "Work", color: .blue)
-
-    history.selectTag(tag?.id)
-    history.pasteStack = PasteStack(items: [item], modifierFlags: [])
-    AppState.shared.navigator.select(item: item)
-
-    Storage.shared.activateEncryptedRuntime()
-
-    XCTAssertTrue(history.items.isEmpty)
-    XCTAssertTrue(history.all.isEmpty)
-    XCTAssertTrue(history.tags.isEmpty)
-    XCTAssertNil(history.selectedTagID)
-    XCTAssertNil(history.pasteStack)
-    XCTAssertTrue(AppState.shared.navigator.selection.isEmpty)
-    XCTAssertNil(AppState.shared.navigator.leadHistoryItem)
   }
 
   func testAddingSame() {
@@ -450,6 +426,73 @@ class HistoryTests: XCTestCase {
     XCTAssertNil(AppState.shared.navigator.leadHistoryItem)
   }
 
+  func testLoadReusesExistingDecorators() async throws {
+    let first = history.add(historyItem("foo"))
+    history.add(historyItem("bar"))
+
+    try await history.load()
+    let reloaded = history.all.first { $0.id == first.id }
+
+    XCTAssertTrue(reloaded === first)
+  }
+
+  func testDecoratorIsReleasedWhileItsItemIsAlive() {
+    let item = historyItem("foo")
+    weak var weakDecorator: HistoryItemDecorator?
+
+    autoreleasepool {
+      let decorator = HistoryItemDecorator(item)
+      weakDecorator = decorator
+    }
+
+    XCTAssertNil(weakDecorator)
+  }
+
+  func testAddingSameDoesNotLeaveOrphanedContents() {
+    history.add(historyItem("foo"))
+    history.add(historyItem("foo"))
+    history.add(historyItem("foo"))
+
+    XCTAssertEqual(history.all.count, 1)
+    XCTAssertEqual(orphanedContentCount(), 0)
+  }
+
+  func testUpdateTextContentDoesNotLeaveOrphanedContents() {
+    let item = history.add(historyItem("foo"))
+
+    history.updateTextContent(for: item.id, newValue: "bar")
+    history.updateTextContent(for: item.id, newValue: "baz")
+
+    XCTAssertEqual(item.item.text, "baz")
+    XCTAssertEqual(item.item.contents.count, 1)
+    XCTAssertEqual(orphanedContentCount(), 0)
+  }
+
+  func testReplaceImageContentDoesNotLeaveOrphanedContents() {
+    let image = NSImage(named: "NSApplicationIcon")!
+    let item = history.add(historyItem(image))
+    let pngData = NSBitmapImageRep(data: image.tiffRepresentation!)!.representation(using: .png, properties: [:])!
+
+    history.replaceImageContent(for: item.id, imageData: pngData)
+    history.replaceImageContent(for: item.id, imageData: pngData)
+
+    XCTAssertEqual(orphanedContentCount(), 0)
+  }
+
+  func testLoadPurgesOrphanedContents() async throws {
+    let orphan = HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue, value: Data("orphan".utf8))
+    Storage.shared.context.insert(orphan)
+    Storage.shared.context.processPendingChanges()
+    try Storage.shared.context.save()
+    XCTAssertEqual(orphanedContentCount(), 1)
+
+    history.add(historyItem("foo"))
+    try await history.load()
+
+    XCTAssertEqual(orphanedContentCount(), 0)
+    XCTAssertEqual(history.all.first?.item.text, "foo")
+  }
+
   func testUpdateTextContentReplacesItemText() {
     let item = history.add(historyItem("foo"))
 
@@ -505,6 +548,11 @@ class HistoryTests: XCTestCase {
     Defaults[.shelfPreviewImageEditorBundleID] = nil
     XCTAssertNil(Defaults[.shelfPreviewImageEditorBundleID])
     Defaults[.shelfPreviewImageEditorBundleID] = previous
+  }
+
+  private func orphanedContentCount() -> Int {
+    let descriptor = FetchDescriptor<HistoryItemContent>(predicate: #Predicate { $0.item == nil })
+    return (try? Storage.shared.context.fetchCount(descriptor)) ?? -1
   }
 
   private func historyItem(_ value: String) -> HistoryItem {
@@ -665,438 +713,149 @@ final class ShelfPreviewPlacementTests: XCTestCase {
   }
 }
 
-private struct RemoteHistoryContentSnapshot: Codable {
-  var type: String
-  var value: Data?
-}
-
-private struct RemoteHistoryItemSnapshot: Codable {
-  var id: UUID
-  var application: String?
-  var firstCopiedAt: Date
-  var lastCopiedAt: Date
-  var updatedAt: Date
-  var tagAssignmentUpdatedAt: Date
-  var numberOfCopies: Int
-  var pin: String?
-  var tagID: UUID?
-  var title: String
-  var customTitle: String?
-  var contents: [RemoteHistoryContentSnapshot]
-  var isDeleted: Bool
-  var shared: Bool
-}
-
-private final class MockCloudKitHistoryStore: CloudKitHistoryStore {
-  private(set) var itemRecords: [CKRecord]
-  private(set) var tagRecords: [CKRecord]
-  private(set) var saveCount = 0
-  var fetchItemDelay: TimeInterval = 0
-  var onItemFetch: (() -> Void)?
-
-  init(itemRecords: [CKRecord] = [], tagRecords: [CKRecord] = []) {
-    self.itemRecords = itemRecords
-    self.tagRecords = tagRecords
-  }
-
-  func fetchItemRecords() async throws -> [CKRecord] {
-    onItemFetch?()
-    if fetchItemDelay > 0 {
-      try? await Task.sleep(for: .milliseconds(Int(fetchItemDelay * 1_000)))
-    }
-    return itemRecords
-  }
-
-  func fetchTagRecords() async throws -> [CKRecord] {
-    return tagRecords
-  }
-
-  func fetchVaultMetadataRecord() async throws -> CKRecord? {
-    return nil
-  }
-
-  func save(records: [CKRecord]) async throws {
-    saveCount += 1
-    for record in records {
-      switch record.recordType {
-      case "MaccyEncryptedItem":
-        upsert(record: record, records: &itemRecords)
-      case "MaccyEncryptedTag":
-        upsert(record: record, records: &tagRecords)
-      default:
-        continue
-      }
-    }
-  }
-
-  func itemSnapshot(id: UUID) -> RemoteHistoryItemSnapshot? {
-    let recordName = "item-\(id)"
-    guard let record = itemRecords.first(where: { $0.recordID.recordName == recordName }),
-          let blob = record["blob"] as? Data else {
-      return nil
-    }
-
-    return try? JSONDecoder().decode(RemoteHistoryItemSnapshot.self, from: blob)
-  }
-
-  private func upsert(record: CKRecord, records: inout [CKRecord]) {
-    if let index = records.firstIndex(where: { $0.recordID == record.recordID }) {
-      records[index] = record
-    } else {
-      records.append(record)
-    }
-  }
-}
-
 @MainActor
-final class SyncReliabilityTests: XCTestCase {
-  private var savedSyncEnabled = false
-  private var savedEncryptionEnabled = false
-  private var savedSyncScope: SyncScope = .all
-  private var savedItemTombstones: Data?
-  private var savedTagTombstones: Data?
+final class LegacyVaultMigrationTests: XCTestCase {
+  private var directory: URL!
+  private var vaultURL: URL!
+  private var defaults: UserDefaults!
+  private var destination: ModelContainer!
+  private let defaultsSuiteName = "LegacyVaultMigrationTests"
 
-  override func setUp() {
-    super.setUp()
-    savedSyncEnabled = Defaults[.syncEnabled]
-    savedEncryptionEnabled = Defaults[.encryptionEnabled]
-    savedSyncScope = Defaults[.syncScope]
-    savedItemTombstones = Defaults[.syncItemTombstones]
-    savedTagTombstones = Defaults[.syncTagTombstones]
-
-    Defaults[.syncEnabled] = true
-    Defaults[.encryptionEnabled] = false
-    Defaults[.syncScope] = .all
-    Defaults[.syncItemTombstones] = nil
-    Defaults[.syncTagTombstones] = nil
-    wipeRuntimeStorage()
-  }
-
-  override func tearDown() {
-    Defaults[.syncEnabled] = savedSyncEnabled
-    Defaults[.encryptionEnabled] = savedEncryptionEnabled
-    Defaults[.syncScope] = savedSyncScope
-    Defaults[.syncItemTombstones] = savedItemTombstones
-    Defaults[.syncTagTombstones] = savedTagTombstones
-    wipeRuntimeStorage()
-    super.tearDown()
-  }
-
-  func testDeleteDuringInFlightSyncDoesNotResurrectItem() async {
-    let id = UUID()
-    let item = insertItem(id: id, text: "keep")
-    let remoteRecord = makeRemoteRecord(item: item)
-    let store = MockCloudKitHistoryStore(itemRecords: [remoteRecord])
-    store.fetchItemDelay = 0.25
-
-    let fetchStarted = expectation(description: "fetch started")
-    store.onItemFetch = { fetchStarted.fulfill() }
-
-    let manager = SyncEncryptionManager(cloudStore: store, configureSyncObservers: false)
-    await manager.requestSync(trigger: "manual", coalesceMutationBurst: false)
-    await fulfillment(of: [fetchStarted], timeout: 2.0)
-
-    if let local = findItem(id: id) {
-      Storage.shared.context.delete(local)
-      Storage.shared.context.processPendingChanges()
-      try? Storage.shared.context.save()
-    }
-    manager.recordDeletedItem(id: id)
-    manager.handleHistoryMutation()
-
-    let isIdle = await manager.waitForSyncIdle(maxWait: 5.0)
-    XCTAssertTrue(isIdle)
-    XCTAssertNil(findItem(id: id))
-    XCTAssertEqual(store.itemSnapshot(id: id)?.isDeleted, true)
-    XCTAssertGreaterThan(manager.diagnosticsStalePassCount, 0)
-  }
-
-  func testBurstDeletesCoalesceAndFullyConverge() async {
-    let ids = (0..<40).map { _ in UUID() }
-    let localItems = ids.map { insertItem(id: $0, text: "item-\($0.uuidString.prefix(4))") }
-    let remoteRecords = localItems.map(makeRemoteRecord)
-    let store = MockCloudKitHistoryStore(itemRecords: remoteRecords)
-    let manager = SyncEncryptionManager(cloudStore: store, configureSyncObservers: false)
-
-    for item in localItems {
-      Storage.shared.context.delete(item)
-    }
-    Storage.shared.context.processPendingChanges()
-    try? Storage.shared.context.save()
-
-    for id in ids {
-      manager.recordDeletedItem(id: id)
-      manager.handleHistoryMutation()
-    }
-
-    let isIdle = await manager.waitForSyncIdle(maxWait: 8.0)
-    XCTAssertTrue(isIdle)
-    let remaining = (try? Storage.shared.context.fetch(FetchDescriptor<HistoryItem>()).count) ?? 0
-    XCTAssertEqual(remaining, 0)
-    XCTAssertTrue(ids.allSatisfy { store.itemSnapshot(id: $0)?.isDeleted == true })
-    XCTAssertLessThan(store.saveCount, ids.count)
-  }
-
-  func testNoDroppedSyncTriggerWhilePassInProgress() async {
-    let id = UUID()
-    let item = insertItem(id: id, text: "original")
-    let store = MockCloudKitHistoryStore(itemRecords: [makeRemoteRecord(item: item)])
-    store.fetchItemDelay = 0.3
-
-    let fetchStarted = expectation(description: "fetch started")
-    store.onItemFetch = { fetchStarted.fulfill() }
-
-    let manager = SyncEncryptionManager(cloudStore: store, configureSyncObservers: false)
-    await manager.requestSync(trigger: "manual", coalesceMutationBurst: false)
-    await fulfillment(of: [fetchStarted], timeout: 2.0)
-
-    if let local = findItem(id: id) {
-      local.title = "updated"
-      local.updatedAt = Date.now.addingTimeInterval(10)
-      Storage.shared.context.processPendingChanges()
-      try? Storage.shared.context.save()
-    }
-    manager.handleHistoryMutation()
-
-    let isIdle = await manager.waitForSyncIdle(maxWait: 5.0)
-    XCTAssertTrue(isIdle)
-    XCTAssertGreaterThanOrEqual(manager.diagnosticsPassCount, 2)
-    XCTAssertEqual(store.itemSnapshot(id: id)?.title, "updated")
-    XCTAssertEqual(store.itemSnapshot(id: id)?.isDeleted, false)
-  }
-
-  func testDeleteWinsAgainstConcurrentRemoteUpdateSameID() async {
-    let id = UUID()
-    let localItem = insertItem(id: id, text: "local")
-    let remoteUpdatedRecord = makeRemoteRecord(
-      id: id,
-      text: "remote-newer",
-      updatedAt: Date.now.addingTimeInterval(120),
-      isDeleted: false
+  override func setUpWithError() throws {
+    try super.setUpWithError()
+    directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    vaultURL = directory.appending(path: "EncryptedStorage.sqlite")
+    defaults = UserDefaults(suiteName: defaultsSuiteName)
+    defaults.removePersistentDomain(forName: defaultsSuiteName)
+    destination = try ModelContainer(
+      for: HistoryItem.self,
+      HistoryTag.self,
+      configurations: ModelConfiguration(nil, isStoredInMemoryOnly: true, cloudKitDatabase: .none)
     )
-    let store = MockCloudKitHistoryStore(itemRecords: [remoteUpdatedRecord])
-    let manager = SyncEncryptionManager(cloudStore: store, configureSyncObservers: false)
-
-    Storage.shared.context.delete(localItem)
-    Storage.shared.context.processPendingChanges()
-    try? Storage.shared.context.save()
-    manager.recordDeletedItem(id: id)
-    manager.handleHistoryMutation()
-
-    let isIdle = await manager.waitForSyncIdle(maxWait: 5.0)
-    XCTAssertTrue(isIdle)
-    XCTAssertNil(findItem(id: id))
-    XCTAssertEqual(store.itemSnapshot(id: id)?.isDeleted, true)
   }
 
-  func testBulkDeleteEmitsSingleMutationSyncTrigger() async {
-    let ids = (0..<12).map { _ in UUID() }
-    let localItems = ids.map { insertItem(id: $0, text: "bulk-\($0.uuidString.prefix(4))") }
-    let store = MockCloudKitHistoryStore(itemRecords: localItems.map(makeRemoteRecord))
-    let manager = SyncEncryptionManager(cloudStore: store, configureSyncObservers: false)
+  override func tearDownWithError() throws {
+    defaults.removePersistentDomain(forName: defaultsSuiteName)
+    try? FileManager.default.removeItem(at: directory)
+    try super.tearDownWithError()
+  }
 
-    for item in localItems {
-      Storage.shared.context.delete(item)
+  func testImportsHistoryAfterCorrectPasswordAndDeletesVault() throws {
+    let key = storeCredentials(password: "password")
+    let tagID = UUID()
+    let taggedID = UUID()
+    let plainID = UUID()
+    try writeVault(
+      items: [
+        LegacyVaultItemSnapshot(id: taggedID, text: "tagged", tagID: tagID, isDeleted: false),
+        LegacyVaultItemSnapshot(id: plainID, text: "plain", isDeleted: false),
+        LegacyVaultItemSnapshot(id: UUID(), text: "gone", isDeleted: true)
+      ],
+      tags: [LegacyVaultTagSnapshot(id: tagID, name: "Work")],
+      key: key
+    )
+
+    var prompts: [Bool] = []
+    var migration = makeMigration()
+    migration.askForPassword = { isRetry in
+      prompts.append(isRetry)
+      return .password(isRetry ? "password" : "wrong")
     }
-    Storage.shared.context.processPendingChanges()
-    try? Storage.shared.context.save()
 
-    manager.recordDeletedItems(ids: ids)
-    manager.handleHistoryMutation()
+    XCTAssertEqual(migration.runIfNeeded(), .imported(items: 2, tags: 1))
+    XCTAssertEqual(prompts, [false, true])
 
-    let isIdle = await manager.waitForSyncIdle(maxWait: 5.0)
-    XCTAssertTrue(isIdle)
-    XCTAssertEqual(manager.diagnosticsPassCount, 1)
-    XCTAssertEqual(store.saveCount, 1)
-    XCTAssertTrue(ids.allSatisfy { store.itemSnapshot(id: $0)?.isDeleted == true })
+    let context = ModelContext(destination)
+    let items = try context.fetch(FetchDescriptor<HistoryItem>())
+    XCTAssertEqual(Set(items.map(\.id)), [taggedID, plainID])
+    XCTAssertEqual(items.first { $0.id == taggedID }?.text, "tagged")
+    XCTAssertEqual(items.first { $0.id == taggedID }?.tag?.name, "Work")
+    XCTAssertNil(items.first { $0.id == plainID }?.tag)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: vaultURL.path))
+    XCTAssertNil(defaults.data(forKey: "encryptionSalt"))
   }
 
-  func testOversizedItemFallsBackToCloudTombstone() async {
-    let id = UUID()
-    let item = insertItem(id: id, text: "oversized")
-    item.contents.first?.value = Data(repeating: 0x41, count: 1_200_000)
-    item.updatedAt = Date.now.addingTimeInterval(5)
-    item.tagAssignmentUpdatedAt = item.updatedAt
-    Storage.shared.context.processPendingChanges()
-    try? Storage.shared.context.save()
+  func testNotNowKeepsVaultForNextLaunch() throws {
+    let key = storeCredentials(password: "password")
+    try writeVault(items: [LegacyVaultItemSnapshot(id: UUID(), text: "keep", isDeleted: false)], tags: [], key: key)
 
-    let store = MockCloudKitHistoryStore()
-    let manager = SyncEncryptionManager(cloudStore: store, configureSyncObservers: false)
-    await manager.requestSync(trigger: "manual", coalesceMutationBurst: false)
+    var migration = makeMigration()
+    migration.askForPassword = { _ in .later }
 
-    let isIdle = await manager.waitForSyncIdle(maxWait: 5.0)
-    XCTAssertTrue(isIdle)
-    XCTAssertEqual(store.saveCount, 1)
-    XCTAssertEqual(store.itemSnapshot(id: id)?.isDeleted, true)
-    XCTAssertEqual(store.itemSnapshot(id: id)?.contents.count, 0)
+    XCTAssertEqual(migration.runIfNeeded(), .postponed)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: vaultURL.path))
+    XCTAssertNotNil(defaults.data(forKey: "encryptionSalt"))
+    XCTAssertEqual(try ModelContext(destination).fetchCount(FetchDescriptor<HistoryItem>()), 0)
   }
 
-  private func wipeRuntimeStorage() {
-    try? Storage.shared.context.delete(model: HistoryItem.self)
-    try? Storage.shared.context.delete(model: HistoryTag.self)
-    Storage.shared.context.processPendingChanges()
-    try? Storage.shared.context.save()
+  func testDeleteRequiresConfirmation() throws {
+    let key = storeCredentials(password: "password")
+    try writeVault(items: [LegacyVaultItemSnapshot(id: UUID(), text: "drop", isDeleted: false)], tags: [], key: key)
+
+    var responses: [LegacyVaultMigration.PasswordResponse] = [.delete, .delete]
+    var confirmations = [false, true]
+    var migration = makeMigration()
+    migration.askForPassword = { _ in responses.removeFirst() }
+    migration.confirmDeletion = { confirmations.removeFirst() }
+
+    XCTAssertEqual(migration.runIfNeeded(), .deleted)
+    XCTAssertTrue(responses.isEmpty)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: vaultURL.path))
+    XCTAssertNil(defaults.data(forKey: "encryptionVerifier"))
+    XCTAssertEqual(try ModelContext(destination).fetchCount(FetchDescriptor<HistoryItem>()), 0)
+  }
+
+  func testWithoutVaultOnlyClearsLegacySettings() {
+    defaults.set(true, forKey: "encryptionEnabled")
+    defaults.set(true, forKey: "syncEnabled")
+
+    var migration = makeMigration()
+    migration.askForPassword = { _ in
+      XCTFail("Should not ask for a password")
+      return .later
+    }
+
+    XCTAssertEqual(migration.runIfNeeded(), .nothingToMigrate)
+    XCTAssertNil(defaults.object(forKey: "encryptionEnabled"))
+    XCTAssertNil(defaults.object(forKey: "syncEnabled"))
+  }
+
+  private func makeMigration() -> LegacyVaultMigration {
+    var migration = LegacyVaultMigration()
+    migration.vaultURL = vaultURL
+    migration.defaults = defaults
+    migration.destination = destination
+    migration.confirmDeletion = { true }
+    return migration
   }
 
   @discardableResult
-  private func insertItem(id: UUID, text: String) -> HistoryItem {
-    let now = Date.now
-    let item = HistoryItem(
-      contents: [HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue, value: Data(text.utf8))]
-    )
-    item.id = id
-    item.title = text
-    item.firstCopiedAt = now
-    item.lastCopiedAt = now
-    item.updatedAt = now
-    item.tagAssignmentUpdatedAt = now
-    Storage.shared.context.insert(item)
-    Storage.shared.context.processPendingChanges()
-    try? Storage.shared.context.save()
-    return item
-  }
-
-  private func findItem(id: UUID) -> HistoryItem? {
-    let descriptor = FetchDescriptor<HistoryItem>(
-      predicate: #Predicate { $0.id == id }
-    )
-    return try? Storage.shared.context.fetch(descriptor).first
-  }
-
-  private func makeRemoteRecord(item: HistoryItem) -> CKRecord {
-    makeRemoteRecord(
-      id: item.id,
-      text: item.title,
-      updatedAt: item.updatedAt,
-      isDeleted: false
-    )
-  }
-
-  private func makeRemoteRecord(
-    id: UUID,
-    text: String,
-    updatedAt: Date,
-    isDeleted: Bool
-  ) -> CKRecord {
-    let snapshot = RemoteHistoryItemSnapshot(
-      id: id,
-      application: nil,
-      firstCopiedAt: updatedAt,
-      lastCopiedAt: updatedAt,
-      updatedAt: updatedAt,
-      tagAssignmentUpdatedAt: updatedAt,
-      numberOfCopies: isDeleted ? 0 : 1,
-      pin: nil,
-      tagID: nil,
-      title: isDeleted ? "" : text,
-      customTitle: nil,
-      contents: isDeleted ? [] : [RemoteHistoryContentSnapshot(type: NSPasteboard.PasteboardType.string.rawValue, value: Data(text.utf8))],
-      isDeleted: isDeleted,
-      shared: !isDeleted
-    )
-
-    let zoneID = CKRecordZone.ID(zoneName: "MaccyHistoryZone", ownerName: CKCurrentUserDefaultName)
-    let recordID = CKRecord.ID(recordName: "item-\(id)", zoneID: zoneID)
-    let record = CKRecord(recordType: "MaccyEncryptedItem", recordID: recordID)
-    if let payload = try? JSONEncoder().encode(snapshot) {
-      record["blob"] = payload as CKRecordValue
-    }
-    record["encrypted"] = NSNumber(booleanLiteral: false)
-    return record
-  }
-}
-
-@MainActor
-final class SyncEncryptionManagerTests: XCTestCase {
-  private var savedEncryptionEnabled = false
-  private var savedEncryptionSalt: Data?
-  private var savedEncryptionVerifier: Data?
-  private var savedSyncEnabled = false
-
-  override func setUp() {
-    super.setUp()
-    savedEncryptionEnabled = Defaults[.encryptionEnabled]
-    savedEncryptionSalt = Defaults[.encryptionSalt]
-    savedEncryptionVerifier = Defaults[.encryptionVerifier]
-    savedSyncEnabled = Defaults[.syncEnabled]
-
-    Defaults[.syncEnabled] = false
-    Defaults[.encryptionEnabled] = false
-    Defaults[.encryptionSalt] = nil
-    Defaults[.encryptionVerifier] = nil
-
-    Storage.shared.clearEncryptedHistory()
-    Storage.shared.clearRuntimeHistory()
-    Storage.shared.clearPlainHistory()
-    Storage.shared.activatePlainRuntime()
-  }
-
-  override func tearDown() {
-    Storage.shared.clearEncryptedHistory()
-    Storage.shared.clearRuntimeHistory()
-    Storage.shared.clearPlainHistory()
-    Storage.shared.activatePlainRuntime()
-
-    Defaults[.syncEnabled] = savedSyncEnabled
-    Defaults[.encryptionEnabled] = savedEncryptionEnabled
-    Defaults[.encryptionSalt] = savedEncryptionSalt
-    Defaults[.encryptionVerifier] = savedEncryptionVerifier
-    super.tearDown()
-  }
-
-  func testStartupOnlyPolicyDoesNotLockOnSleep() {
-    XCTAssertFalse(UnlockPolicy.onStartup.locksOnSleep)
-  }
-
-  func testSleepAndStartupPolicyLocksOnSleep() {
-    XCTAssertTrue(UnlockPolicy.onSleepOrRestart.locksOnSleep)
-  }
-
-  func testChangePasswordRotatesCredentials() {
-    Defaults[.encryptionEnabled] = true
+  private func storeCredentials(password: String) -> SymmetricKey {
     let salt = Data(repeating: 7, count: 16)
-    let key = deriveKey(password: "old-password", salt: salt)
-    guard let verifier = encrypt(Data("maccy-vault-verifier-v1".utf8), with: key) else {
-      XCTFail("Failed to encrypt verifier")
-      return
-    }
-    Defaults[.encryptionSalt] = salt
-    Defaults[.encryptionVerifier] = verifier
+    let key = deriveKey(password: password, salt: salt)
+    defaults.set(true, forKey: "encryptionEnabled")
+    defaults.set(salt, forKey: "encryptionSalt")
+    defaults.set(encrypt(Data("maccy-vault-verifier-v1".utf8), with: key), forKey: "encryptionVerifier")
+    return key
+  }
 
-    let manager = SyncEncryptionManager(cloudStore: UnavailableCloudKitHistoryStore(), configureSyncObservers: false)
-
-    XCTAssertTrue(manager.unlock(password: "old-password"))
-
-    let item = HistoryItem(
-      contents: [HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue, value: Data("hello".utf8))]
+  private func writeVault(items: [LegacyVaultItemSnapshot], tags: [LegacyVaultTagSnapshot], key: SymmetricKey) throws {
+    let vault = try ModelContainer(
+      for: EncryptedHistoryItemRecord.self,
+      EncryptedHistoryTagRecord.self,
+      configurations: ModelConfiguration(url: vaultURL, cloudKitDatabase: .none)
     )
-    let itemID = item.id
-    Storage.shared.context.insert(item)
-    try? Storage.shared.context.save()
-    manager.persistEncryptedVaultFromRuntime()
-
-    let changeExpectation = expectation(description: "password changed")
-
-    Task {
-      let changed = await manager.changePassword(currentPassword: "old-password", newPassword: "new-password")
-      XCTAssertTrue(changed)
-      changeExpectation.fulfill()
+    let context = ModelContext(vault)
+    for item in items {
+      let blob = try XCTUnwrap(encrypt(try JSONEncoder().encode(item), with: key))
+      context.insert(EncryptedHistoryItemRecord(id: item.id, blob: blob))
     }
-
-    wait(for: [changeExpectation], timeout: 5.0)
-
-    XCTAssertEqual(item.id, itemID)
-    XCTAssertEqual(item.text, "hello")
-
-    manager.lock(reason: .manual)
-
-    XCTAssertFalse(manager.unlock(password: "old-password"))
-    XCTAssertTrue(manager.unlock(password: "new-password"))
-
-    let items = (try? Storage.shared.context.fetch(FetchDescriptor<HistoryItem>())) ?? []
-    XCTAssertEqual(items.count, 1)
-    XCTAssertEqual(items.first?.id, itemID)
-    XCTAssertEqual(items.first?.text, "hello")
+    for tag in tags {
+      let blob = try XCTUnwrap(encrypt(try JSONEncoder().encode(tag), with: key))
+      context.insert(EncryptedHistoryTagRecord(id: tag.id, blob: blob))
+    }
+    try context.save()
   }
 
   private func deriveKey(password: String, salt: Data) -> SymmetricKey {
@@ -1111,4 +870,45 @@ final class SyncEncryptionManagerTests: XCTestCase {
     let box = try? AES.GCM.seal(data, using: key)
     return box?.combined
   }
+}
+
+// The vault formats written by earlier builds (including the `shared` field from iCloud sync).
+private struct LegacyVaultItemSnapshot: Codable {
+  struct Content: Codable {
+    var type: String
+    var value: Data?
+  }
+
+  var id: UUID
+  var application: String?
+  var firstCopiedAt = Date.now
+  var lastCopiedAt = Date.now
+  var updatedAt = Date.now
+  var tagAssignmentUpdatedAt = Date.now
+  var numberOfCopies = 1
+  var pin: String?
+  var tagID: UUID?
+  var title: String
+  var customTitle: String?
+  var contents: [Content]
+  var isDeleted: Bool
+  var shared: Bool
+
+  init(id: UUID, text: String, tagID: UUID? = nil, isDeleted: Bool) {
+    self.id = id
+    self.tagID = tagID
+    self.title = isDeleted ? "" : text
+    self.contents = isDeleted ? [] : [Content(type: NSPasteboard.PasteboardType.string.rawValue, value: Data(text.utf8))]
+    self.isDeleted = isDeleted
+    self.shared = !isDeleted
+  }
+}
+
+private struct LegacyVaultTagSnapshot: Codable {
+  var id: UUID
+  var name: String
+  var colorKey = ShelfTagColor.blue.rawValue
+  var createdAt = Date.now
+  var updatedAt = Date.now
+  var isDeleted = false
 }

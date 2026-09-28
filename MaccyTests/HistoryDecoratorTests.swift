@@ -112,6 +112,43 @@ class HistoryItemDecoratorTests: XCTestCase {
     XCTAssertNil(itemDecorator.previewImageGenerationTask)
   }
 
+  func testDownsampledThumbnailDoesNotKeepFullSizeImage() {
+    let image = NSImage(named: "NSApplicationIcon")!
+    let itemDecorator = historyItemDecorator(image)
+    itemDecorator.sizeImages()
+
+    let thumbnail = itemDecorator.thumbnailImage!
+    XCTAssertEqual(thumbnail.size, NSSize(width: 40, height: 40))
+    XCTAssertEqual(thumbnail.representations.count, 1)
+    let representation = thumbnail.representations[0]
+    XCTAssertLessThanOrEqual(representation.pixelsHigh, 40 * 3)
+    XCTAssertLessThanOrEqual(representation.pixelsWide, 40 * 3)
+  }
+
+  func testEnsureThumbnailImageGeneratesInBackground() async {
+    let image = NSImage(named: "NSApplicationIcon")!
+    let itemDecorator = historyItemDecorator(image)
+
+    itemDecorator.ensureThumbnailImage()
+    _ = await itemDecorator.thumbnailImageGenerationTask?.result
+
+    XCTAssertEqual(itemDecorator.thumbnailImage?.size, NSSize(width: 40, height: 40))
+    XCTAssertNil(itemDecorator.thumbnailImageGenerationTask)
+  }
+
+  func testDecoratorIsNotRetainedByItemObservation() {
+    let item = historyItemDecorator("foo").item
+    weak var weakDecorator: HistoryItemDecorator?
+
+    autoreleasepool {
+      let decorator = HistoryItemDecorator(item)
+      weakDecorator = decorator
+    }
+
+    XCTAssertNil(weakDecorator)
+    item.title = "bar"
+  }
+
   // We also need to add test for image with width bigger than max width.
   func testImageWithHeightBiggerThanMaxHeight() {
     let image = NSImage(named: "NSApplicationIcon")!

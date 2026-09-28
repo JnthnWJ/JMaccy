@@ -93,7 +93,10 @@ struct PinValueView: View {
 
     // Remove all non-plain-text content
     let stringType = NSPasteboard.PasteboardType.string.rawValue
+    let removedContents = item.contents.filter { $0.type != stringType }
     item.contents.removeAll { $0.type != stringType }
+    // Detached contents aren't deleted automatically, so delete them to avoid orphaned rows.
+    removedContents.forEach { item.modelContext?.delete($0) }
 
     // Update or add the plain text content
     if let index = item.contents.firstIndex(where: { $0.type == stringType }) {
