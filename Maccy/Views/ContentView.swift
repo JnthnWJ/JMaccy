@@ -606,6 +606,7 @@ private struct ShelfTopStripView: View {
             .font(.title3)
             .foregroundStyle(.secondary)
             .frame(width: trailingActionsWidth, height: 40)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("shelf-actions")
