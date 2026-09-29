@@ -39,8 +39,9 @@ struct KeyHandlingView<Content: View>: View {
     let shelfMode = appState.shelfModeEnabled
     let firstResponder = NSApp.keyWindow?.firstResponder
 
-    // Let native text editing handle key events while any text input is active.
-    if firstResponder is NSTextView, keyChord != .renameCurrentItem {
+    // Let the shelf search handle Escape even when its field editor is the first responder.
+    let closesShelfSearch = shelfMode && searchFocused && keyChord == .close
+    if firstResponder is NSTextView, keyChord != .renameCurrentItem, !closesShelfSearch {
       return false
     }
 

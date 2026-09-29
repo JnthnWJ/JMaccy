@@ -157,6 +157,22 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     return Color(hue: hue, saturation: 0.84, brightness: 0.95)
   }
 
+  var shelfHeaderForegroundColor: Color {
+    guard let color = NSColor(shelfHeaderColor).usingColorSpace(.deviceRGB) else {
+      return .white
+    }
+
+    func linear(_ component: CGFloat) -> Double {
+      let value = Double(component)
+      return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+    }
+
+    let luminance = 0.2126 * linear(color.redComponent)
+      + 0.7152 * linear(color.greenComponent)
+      + 0.0722 * linear(color.blueComponent)
+    return luminance > 0.179 ? .black : .white
+  }
+
   var shelfExcerpt: String {
     if hasImage {
       return ""

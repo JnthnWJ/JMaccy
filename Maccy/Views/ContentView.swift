@@ -200,6 +200,7 @@ private struct ShelfTopStripView: View {
 
   private struct TagChip: Identifiable {
     let id: String
+    let accessibilityID: String
     let title: String
     let color: Color
     let tagID: UUID?
@@ -225,15 +226,24 @@ private struct ShelfTopStripView: View {
   @State private var deleteTagName = ""
 
   private var chips: [TagChip] {
+    let tags = appState.history.tags
+    let slugCounts = Dictionary(grouping: tags, by: { normalizedTagIdentifier($0.name) })
+      .mapValues { $0.count }
     let allChip = TagChip(
       id: "all",
+      accessibilityID: "all",
       title: NSLocalizedString("shelf_tag_all", comment: ""),
       color: .white.opacity(0.95),
       tagID: nil
     )
-    let tagChips = appState.history.tags.map { tag in
-      TagChip(
-        id: normalizedTagIdentifier(tag.name),
+    let tagChips = tags.map { tag in
+      let slug = normalizedTagIdentifier(tag.name)
+      let accessibilityID = slug == "all" || slugCounts[slug, default: 0] > 1
+        ? "\(slug)-\(tag.id.uuidString.lowercased())"
+        : slug
+      return TagChip(
+        id: tag.id.uuidString,
+        accessibilityID: accessibilityID,
         title: tag.name,
         color: tag.color.color,
         tagID: tag.id
@@ -256,7 +266,34 @@ private struct ShelfTopStripView: View {
   }
 
   private var dotRailWidth: CGFloat {
-    CGFloat(chips.count) * 20
+    CGFloat(chips.count * 12 + max(chips.count - 1, 0) * 14)
+  }
+
+  private func preferredTagRailWidth(_ presentation: TagPresentation) -> CGFloat {
+    switch presentation {
+    case .dotOnly:
+      return dotRailWidth
+    case .full:
+      let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+      let chipWidth = chips.reduce(CGFloat.zero) { width, chip in
+        let titleWidth = (chip.title as NSString).size(withAttributes: [.font: font]).width
+        return width + ceil(titleWidth) + 38
+      }
+      return chipWidth + CGFloat(max(chips.count - 1, 0) * 4)
+    }
+  }
+
+  private func tagRailWidth(
+    availableWidth: CGFloat,
+    presentation: TagPresentation,
+    expandedSearchWidth: CGFloat
+  ) -> CGFloat {
+    let searchWidth: CGFloat = showSearch ? (isSearchExpanded ? expandedSearchWidth : 24) : 0
+    let addTagWidth: CGFloat = isSearchExpanded ? 0 : 20
+    let spacingCount = (showSearch ? 1 : 0) + (isSearchExpanded ? 0 : 1)
+    let remainingWidth = availableWidth - trailingActionsInset - searchWidth - addTagWidth
+      - CGFloat(spacingCount * 12)
+    return min(preferredTagRailWidth(presentation), max(24, remainingWidth))
   }
 
   private var selectedTagForegroundColor: Color {
@@ -273,7 +310,8 @@ private struct ShelfTopStripView: View {
 
   private func preferredExpandedSearchWidth(availableWidth: CGFloat) -> CGFloat {
     let preferred = max(320, min(620, availableWidth - 260))
-    let maxAllowed = max(210, availableWidth - trailingActionsInset - dotRailWidth - 44)
+    let reservedTagWidth = min(dotRailWidth, max(60, availableWidth * 0.25))
+    let maxAllowed = max(120, availableWidth - trailingActionsInset - reservedTagWidth - 12)
     return min(preferred, maxAllowed)
   }
 
@@ -334,9 +372,9 @@ private struct ShelfTopStripView: View {
   private func tagAccessibilityIdentifier(for chip: TagChip, presentation: TagPresentation) -> String {
     switch presentation {
     case .dotOnly:
-      return "shelf-tag-dot-\(chip.id)"
+      return "shelf-tag-dot-\(chip.accessibilityID)"
     case .full:
-      return "shelf-tag-full-\(chip.id)"
+      return "shelf-tag-full-\(chip.accessibilityID)"
     }
   }
 
@@ -434,6 +472,11 @@ private struct ShelfTopStripView: View {
     GeometryReader { geo in
       let tagPresentation: TagPresentation = isSearchExpanded ? .dotOnly : .full
       let expandedSearchWidth = preferredExpandedSearchWidth(availableWidth: geo.size.width)
+      let railWidth = tagRailWidth(
+        availableWidth: geo.size.width,
+        presentation: tagPresentation,
+        expandedSearchWidth: expandedSearchWidth
+      )
 
       ZStack(alignment: .trailing) {
         HStack(spacing: 12) {
@@ -467,11 +510,15 @@ private struct ShelfTopStripView: View {
             }
           }
 
-          HStack(spacing: tagPresentation == .dotOnly ? 14 : 4) {
-            ForEach(chips) { chip in
-              tagButton(for: chip, presentation: tagPresentation)
+          ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: tagPresentation == .dotOnly ? 14 : 4) {
+              ForEach(chips) { chip in
+                tagButton(for: chip, presentation: tagPresentation)
+              }
             }
+            .frame(height: 40)
           }
+          .frame(width: railWidth, height: 40)
 
           if !isSearchExpanded {
             Button {
@@ -855,7 +902,7 @@ private struct ShelfCardView: View {
               .font(.caption)
           }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(item.shelfHeaderForegroundColor)
         .padding(10)
         .background(item.shelfHeaderColor)
 

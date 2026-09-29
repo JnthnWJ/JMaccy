@@ -253,7 +253,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       return
     }
 
-    if addedItem.isVisible {
+    if items.contains(where: { $0.id == addedItem.id }) {
       AppState.shared.navigator.selectWithoutScrolling(item: addedItem, footerItem: nil)
     } else {
       AppState.shared.navigator.selectWithoutScrolling(item: nil, footerItem: nil)

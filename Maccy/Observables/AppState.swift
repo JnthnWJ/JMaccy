@@ -1225,7 +1225,7 @@ class AppState: Sendable {
             toolbarIcon: NSImage.gearshape!
           ) {
             GeneralSettingsPane()
-              .frame(minWidth: minimumWidth)
+              .frame(minWidth: max(minimumWidth, 640))
           },
           Settings.Pane(
             identifier: Settings.PaneIdentifier.storage,

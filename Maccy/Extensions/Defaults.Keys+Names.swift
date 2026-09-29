@@ -13,7 +13,7 @@ struct StorageType {
 extension Defaults.Keys {
 #if DEBUG
   // UI Tests bundle preferences
-  static let testingSuiteName = "\(Bundle.main.bundleIdentifier ?? "org.p0deje.Maccy").uitests"
+  static let testingSuiteName = "\(Bundle.main.bundleIdentifier ?? "com.jnthnwj.JMaccy").uitests"
 
   // When UI tests run with the `enable-testing` argument, window and pin
   // preferences are stored in a separate xcuitest bundle

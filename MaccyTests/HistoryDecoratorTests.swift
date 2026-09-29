@@ -230,6 +230,18 @@ class HistoryItemDecoratorTests: XCTestCase {
     assertColorsEqual(itemDecorator.shelfHeaderColor, originalColor)
   }
 
+  func testShelfHeaderForegroundColorContrastsWithTagColor() {
+    let itemDecorator = historyItemDecorator("foo")
+    let tag = HistoryTag(name: "Work", colorKey: ShelfTagColor.amber.rawValue)
+    Storage.shared.context.insert(tag)
+    itemDecorator.item.tag = tag
+
+    assertColorsEqual(itemDecorator.shelfHeaderForegroundColor, .black)
+
+    tag.colorKey = ShelfTagColor.indigo.rawValue
+    assertColorsEqual(itemDecorator.shelfHeaderForegroundColor, .white)
+  }
+
   func testShelfContentBackgroundColorUsesHexCode() {
     let itemDecorator = historyItemDecorator("#F5AB82")
     assertColorsEqual(

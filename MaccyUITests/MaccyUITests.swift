@@ -20,7 +20,7 @@ private struct HistoryItemQuery {
 class MaccyUITests: XCTestCase {
   let app = XCUIApplication()
   let pasteboard = NSPasteboard.general
-  let appBundleId = "org.p0deje.Maccy"
+  let appPreferencesSuite = "com.jnthnwj.JMaccy.uitests"
 
   let copy1 = UUID().uuidString
   let copy2 = UUID().uuidString
@@ -1095,7 +1095,7 @@ class MaccyUITests: XCTestCase {
   }
 
   private func setPopupLayoutMode(_ mode: String) {
-    let defaults = UserDefaults(suiteName: appBundleId)
+    let defaults = UserDefaults(suiteName: appPreferencesSuite)
     defaults?.set(mode, forKey: "popupLayoutMode")
     defaults?.synchronize()
     usleep(300000)
