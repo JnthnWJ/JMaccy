@@ -187,10 +187,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     var removedItemIndex: Int?
     if let existingHistoryItem = findSimilarItem(item) {
       if isModified(item) == nil {
-        let replacedContents = item.contents
-        item.contents = existingHistoryItem.contents
-        // The replaced contents would otherwise stay in the store as orphaned rows.
-        replacedContents.forEach { Storage.shared.context.delete($0) }
+        transferContents(from: existingHistoryItem, to: item)
       }
       item.firstCopiedAt = existingHistoryItem.firstCopiedAt
       item.numberOfCopies += existingHistoryItem.numberOfCopies
@@ -207,7 +204,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       if let removedItemIndex {
         cleanup(all[removedItemIndex])
       }
-      Storage.shared.context.delete(existingHistoryItem)
+      deleteFromStorage(existingHistoryItem)
       if let removedItemIndex {
         all.remove(at: removedItemIndex)
       }
@@ -291,10 +288,11 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
       for item in storedItems {
         item.tag = nil
-        Storage.shared.context.delete(item)
+        deleteFromStorage(item)
       }
       Storage.shared.context.processPendingChanges()
       try? Storage.shared.context.save()
+      Storage.shared.purgeOrphanedContents()
     }
 
     Clipboard.shared.clear()
@@ -316,10 +314,11 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
       for item in storedItems {
         item.tag = nil
-        Storage.shared.context.delete(item)
+        deleteFromStorage(item)
       }
       Storage.shared.context.processPendingChanges()
       try? Storage.shared.context.save()
+      Storage.shared.purgeOrphanedContents()
     }
 
     Clipboard.shared.clear()
@@ -347,7 +346,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
     withLogging("Removing \(existingItems.count) history items") {
       for item in existingItems {
-        Storage.shared.context.delete(item.item)
+        deleteFromStorage(item.item)
       }
       Storage.shared.context.processPendingChanges()
       try? Storage.shared.context.save()
@@ -465,6 +464,26 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     AppState.shared.popup.needsResize = true
 
     return true
+  }
+
+  // The replaced contents would otherwise stay in the store as orphaned rows, and emptying the
+  // existing item keeps its cascade delete from taking the transferred contents with it.
+  @MainActor
+  private func transferContents(from existingItem: HistoryItem, to newItem: HistoryItem) {
+    deleteContents(of: newItem)
+    newItem.contents = existingItem.contents
+    existingItem.contents = []
+  }
+
+  @MainActor
+  private func deleteFromStorage(_ item: HistoryItem) {
+    deleteContents(of: item)
+    Storage.shared.context.delete(item)
+  }
+
+  @MainActor
+  private func deleteContents(of item: HistoryItem) {
+    item.contents.forEach(Storage.shared.context.delete)
   }
 
   // Removing a content from the relationship only nullifies its `item`; the row itself (including
