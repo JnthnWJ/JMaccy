@@ -23,7 +23,8 @@ private final class ShelfAuxiliaryPanel: NSPanel {
     self.identifier = NSUserInterfaceItemIdentifier(identifier)
     animationBehavior = .none
     isFloatingPanel = true
-    level = .statusBar
+    // Sit above the shelf panel (.screenSaver) so the pointer can overlap it and touch the card.
+    level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
     collectionBehavior = [.auxiliary, .stationary, .moveToActiveSpace, .fullScreenAuxiliary]
     titleVisibility = .hidden
     titlebarAppearsTransparent = true
@@ -121,22 +122,21 @@ struct ShelfPreviewPlacement {
 
 enum ShelfPreviewLayoutMetrics {
   static let screenMargin: CGFloat = 12
-  static let pointerWidth: CGFloat = 42
-  static let pointerHeight: CGFloat = 16
-  static let pointerHorizontalInset: CGFloat = 10
-  static let pointerVerticalOffset: CGFloat = -0.5
-  static let pointerContainerHeight: CGFloat = 15
-  static let pointerBorderGapInset: CGFloat = 4
-  static let pointerBorderGapHeight: CGFloat = 2
+  static let cornerRadius: CGFloat = 22
+  static let contentCornerRadius: CGFloat = 13
+  static let shellInset: CGFloat = 9
+  static let pointerWidth: CGFloat = 28
+  static let pointerHeight: CGFloat = 13
   static let popupOuterPadding: CGFloat = 6
   static let pointerTouchGap: CGFloat = 0
 
+  // Keep the pointer clear of the rounded corners.
   static var pointerCenterInset: CGFloat {
-    pointerHorizontalInset + pointerWidth / 2
+    cornerRadius + 4 + pointerWidth / 2
   }
 
   static var pointerTipOffsetFromWindowBottom: CGFloat {
-    popupOuterPadding + pointerContainerHeight - (pointerHeight + pointerVerticalOffset)
+    popupOuterPadding
   }
 }
 
@@ -213,6 +213,7 @@ class ShelfPreview {
   var isOpen = false
   var isTextEditorOpen = false
   var pointerX: CGFloat = 0
+  var editorPointerX: CGFloat?
   var editingText = ""
 
   @ObservationIgnored private var logger: Logger = {
@@ -428,6 +429,13 @@ class ShelfPreview {
     isTextEditorOpen = false
     editingItemID = nil
 
+    if let previewPanel, previewPanel.isVisible, previewPanel.alphaValue < 1 {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = 0.12
+        previewPanel.animator().alphaValue = 1
+      }
+    }
+
     guard let panel = textEditorPanel, panel.isVisible else {
       return
     }
@@ -578,9 +586,24 @@ class ShelfPreview {
     isTextEditorOpen = true
 
     let panel = ensureTextEditorPanel()
-    panel.updateRootView(makeTextEditorView())
 
-    let finalFrame = textEditorFrame()
+    let finalFrame: NSRect
+    if let placement = textEditorPlacement(for: item) {
+      editorPointerX = placement.pointerX
+      finalFrame = placement.frame
+      panel.isMovable = false
+      if let previewPanel, previewPanel.isVisible {
+        NSAnimationContext.runAnimationGroup { context in
+          context.duration = 0.1
+          previewPanel.animator().alphaValue = 0
+        }
+      }
+    } else {
+      editorPointerX = nil
+      finalFrame = textEditorFrame()
+      panel.isMovable = true
+    }
+    panel.updateRootView(makeTextEditorView())
     let startFrame = scaledFrame(from: finalFrame, scale: 0.96, yOffset: -8)
 
     panel.setFrame(startFrame, display: false)
@@ -913,15 +936,39 @@ class ShelfPreview {
     return NSSize(width: width, height: height)
   }
 
-  private func textEditorFrame() -> NSRect {
-    let screenFrame = AppState.shared.appDelegate?.panel.screen?.visibleFrame
+  private var editorScreenFrame: NSRect {
+    AppState.shared.appDelegate?.panel.screen?.visibleFrame
       ?? NSScreen.forPopup?.visibleFrame
       ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+  }
 
-    let size = NSSize(
+  private func textEditorSize(screenFrame: NSRect) -> NSSize {
+    NSSize(
       width: min(max(560, screenFrame.width * 0.48), 920),
       height: min(max(320, screenFrame.height * 0.42), 620)
     )
+  }
+
+  // Pops the editor out of its card, like the preview, when the card is on screen.
+  private func textEditorPlacement(for item: HistoryItemDecorator) -> ShelfPreviewPlacement? {
+    guard let cardFrame = currentCardFrame(for: item.id) else {
+      return nil
+    }
+
+    let screenFrame = editorScreenFrame
+    let placement = Self.computePreviewPlacement(
+      preferredSize: textEditorSize(screenFrame: screenFrame),
+      minimumSize: NSSize(width: 420, height: 240),
+      selectedCardFrame: cardFrame,
+      carouselViewportFrame: currentCarouselViewportFrame(),
+      screenFrame: screenFrame
+    )
+    return placement.isValid ? placement : nil
+  }
+
+  private func textEditorFrame() -> NSRect {
+    let screenFrame = editorScreenFrame
+    let size = textEditorSize(screenFrame: screenFrame)
 
     let referenceFrame = previewPanel?.frame ?? AppState.shared.appDelegate?.panel.frame ?? screenFrame
 

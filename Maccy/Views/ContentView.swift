@@ -122,7 +122,7 @@ private struct ShelfContentView: View {
   }
 
   var body: some View {
-    VStack(spacing: 10) {
+    VStack(spacing: 2) {
       ShelfTopStripView(
         searchQuery: $searchQuery,
         searchFocused: $searchFocused,
@@ -136,7 +136,8 @@ private struct ShelfContentView: View {
       )
     }
     .padding(.horizontal, 8)
-    .padding(.vertical, 14)
+    .padding(.top, 8)
+    .padding(.bottom, 12)
     .onAppear {
       appState.shelfPreview.closeAll()
       searchFocused = false
@@ -806,13 +807,13 @@ private struct ShelfCarouselView: View {
               }
             }
             .padding(.horizontal, 4)
-            .padding(.vertical, 10)
+            .padding(.vertical, 8)
             .background {
               ShelfWheelBridge()
                 .frame(width: 0, height: 0)
             }
           }
-          .frame(height: 248)
+          .frame(height: 236)
           .accessibilityIdentifier("shelf-carousel")
           .onAppear {
             if let selectedId = appState.navigator.leadSelection {
@@ -854,7 +855,7 @@ private struct ShelfCarouselView: View {
         }
       }
     }
-    .frame(minHeight: 248)
+    .frame(minHeight: 236)
   }
 }
 
@@ -902,7 +903,7 @@ private struct ShelfCardView: View {
               .font(.caption)
           }
         }
-        .foregroundStyle(item.shelfHeaderForegroundColor)
+        .foregroundStyle(.white)
         .padding(10)
         .background(item.shelfHeaderColor)
 
@@ -1545,44 +1546,129 @@ private struct ShelfTextEditorAppearanceBridge: NSViewRepresentable {
   }
 }
 
-private struct ShelfPreviewPointerShape: Shape {
+// Popover body and pointer as one path, so fill and outline have no seam where they meet.
+private struct ShelfPopoverShape: Shape {
+  var pointerX: CGFloat?
+  var inset: CGFloat = 0
+
   func path(in rect: CGRect) -> Path {
-    let tip = CGPoint(x: rect.midX, y: rect.maxY)
-    let leftControl1 = CGPoint(x: rect.minX + rect.width * 0.20, y: rect.minY)
-    let leftControl2 = CGPoint(x: rect.midX - rect.width * 0.24, y: rect.maxY * 0.9)
-    let rightControl1 = CGPoint(x: rect.midX + rect.width * 0.24, y: rect.maxY * 0.9)
-    let rightControl2 = CGPoint(x: rect.maxX - rect.width * 0.20, y: rect.minY)
+    let metrics = ShelfPreviewLayoutMetrics.self
+    let bounds = rect.insetBy(dx: inset, dy: inset)
+    let radius = metrics.cornerRadius - inset
+    let bottom = rect.maxY - (pointerX == nil ? 0 : metrics.pointerHeight) - inset
+    let topLeft = CGPoint(x: bounds.minX, y: bounds.minY)
+    let topRight = CGPoint(x: bounds.maxX, y: bounds.minY)
+    let bottomRight = CGPoint(x: bounds.maxX, y: bottom)
+    let bottomLeft = CGPoint(x: bounds.minX, y: bottom)
 
     var path = Path()
-    path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-    path.addCurve(to: tip, control1: leftControl1, control2: leftControl2)
-    path.addCurve(
-      to: CGPoint(x: rect.maxX, y: rect.minY),
-      control1: rightControl1,
-      control2: rightControl2
-    )
+    path.move(to: CGPoint(x: bounds.minX + radius, y: bounds.minY))
+    path.addArc(tangent1End: topRight, tangent2End: bottomRight, radius: radius)
+    path.addArc(tangent1End: bottomRight, tangent2End: bottomLeft, radius: radius)
+
+    if let pointerX {
+      let edgeInset = metrics.pointerCenterInset - metrics.popupOuterPadding
+      let x = max(edgeInset, min(pointerX - metrics.popupOuterPadding, rect.width - edgeInset))
+      let half = metrics.pointerWidth / 2
+      let height = bounds.maxY - bottom
+      let tipRadius: CGFloat = 4.5
+      let shoulderRadius: CGFloat = 12
+      // Straight flanks rounded at the tip and blended into the edge at the shoulders.
+      // Push the sharp tip down by however much the rounding shaves off it.
+      let halfAngle = atan(half / height)
+      let tip = CGPoint(x: x, y: bounds.maxY + tipRadius / sin(halfAngle) - tipRadius)
+      let rightBase = CGPoint(x: x + half, y: bottom)
+      let leftBase = CGPoint(x: x - half, y: bottom)
+
+      path.addArc(tangent1End: rightBase, tangent2End: tip, radius: shoulderRadius)
+      path.addArc(tangent1End: tip, tangent2End: leftBase, radius: tipRadius)
+      path.addArc(tangent1End: leftBase, tangent2End: bottomLeft, radius: shoulderRadius)
+    }
+
+    path.addArc(tangent1End: bottomLeft, tangent2End: topLeft, radius: radius)
+    path.addArc(tangent1End: topLeft, tangent2End: topRight, radius: radius)
     path.closeSubpath()
     return path
   }
 }
 
-private struct ShelfPreviewPointerOutlineShape: Shape {
-  func path(in rect: CGRect) -> Path {
-    let tip = CGPoint(x: rect.midX, y: rect.maxY)
-    let leftControl1 = CGPoint(x: rect.minX + rect.width * 0.20, y: rect.minY)
-    let leftControl2 = CGPoint(x: rect.midX - rect.width * 0.24, y: rect.maxY * 0.9)
-    let rightControl1 = CGPoint(x: rect.midX + rect.width * 0.24, y: rect.maxY * 0.9)
-    let rightControl2 = CGPoint(x: rect.maxX - rect.width * 0.20, y: rect.minY)
+private struct ShelfPopoverButtonStyle: ButtonStyle {
+  var prominent = false
 
-    var path = Path()
-    path.move(to: CGPoint(x: rect.minX, y: rect.minY))
-    path.addCurve(to: tip, control1: leftControl1, control2: leftControl2)
-    path.addCurve(
-      to: CGPoint(x: rect.maxX, y: rect.minY),
-      control1: rightControl1,
-      control2: rightControl2
-    )
-    return path
+  @Environment(\.isEnabled) private var isEnabled
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .font(.body.weight(prominent ? .semibold : .medium))
+      .foregroundStyle(prominent ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+      .padding(.horizontal, 14)
+      .frame(minWidth: 30, minHeight: 30)
+      .background(
+        Capsule().fill(prominent ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.primary.opacity(0.08)))
+      )
+      .contentShape(Capsule())
+      .opacity(configuration.isPressed ? 0.7 : (isEnabled ? 1 : 0.4))
+  }
+}
+
+private struct ShelfPopoverShell<Leading: View, Title: View, Trailing: View, Content: View>: View {
+  let pointerX: CGFloat?
+  @ViewBuilder let leading: Leading
+  @ViewBuilder let title: Title
+  @ViewBuilder let trailing: Trailing
+  @ViewBuilder let content: Content
+
+  private typealias Metrics = ShelfPreviewLayoutMetrics
+
+  var body: some View {
+    VStack(spacing: 0) {
+      HStack(spacing: 8) {
+        leading
+        Spacer(minLength: 12)
+        trailing
+      }
+      .overlay {
+        title
+          .allowsHitTesting(false)
+      }
+      .padding(.horizontal, Metrics.shellInset + 2)
+      .frame(height: 48)
+
+      content
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .textBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: Metrics.contentCornerRadius, style: .continuous))
+        .padding([.horizontal, .bottom], Metrics.shellInset)
+    }
+    .padding(.bottom, pointerX == nil ? 0 : Metrics.pointerHeight)
+    .background {
+      ShelfPopoverShape(pointerX: pointerX)
+        .fill(.regularMaterial)
+    }
+    .overlay {
+      ShelfPopoverShape(pointerX: pointerX, inset: 0.5)
+        .stroke(.white.opacity(0.35), lineWidth: 1)
+        .allowsHitTesting(false)
+    }
+    .padding(Metrics.popupOuterPadding)
+  }
+}
+
+private struct ShelfPopoverTitle: View {
+  let title: Text
+  let subtitle: String
+
+  var body: some View {
+    VStack(spacing: 1) {
+      title
+        .font(.headline)
+      if !subtitle.isEmpty {
+        Text(verbatim: subtitle)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .lineLimit(1)
   }
 }
 
@@ -1627,17 +1713,9 @@ struct ShelfPreviewPopupView: View {
     ].joined(separator: "  ·  ")
   }
 
-  private func clampedPointerCenterX(totalWidth: CGFloat) -> CGFloat {
-    let inset = ShelfPreviewLayoutMetrics.pointerCenterInset
-    return max(inset, min(appState.shelfPreview.pointerX, totalWidth - inset))
-  }
-
-  private func pointerOffset(totalWidth: CGFloat) -> CGFloat {
-    clampedPointerCenterX(totalWidth: totalWidth) - ShelfPreviewLayoutMetrics.pointerWidth / 2
-  }
-
   private func pointerTipProbe(in size: CGSize) -> some View {
-    let tipX = clampedPointerCenterX(totalWidth: size.width)
+    let inset = ShelfPreviewLayoutMetrics.pointerCenterInset
+    let tipX = max(inset, min(appState.shelfPreview.pointerX, size.width - inset))
     let tipY = size.height - ShelfPreviewLayoutMetrics.pointerTipOffsetFromWindowBottom
 
     return Color.black.opacity(0.001)
@@ -1656,39 +1734,30 @@ struct ShelfPreviewPopupView: View {
         AsyncView<NSImage?, _, _> {
           await item.asyncGetPreviewImage()
         } content: { image in
-          Group {
-            if let image {
-              Image(nsImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black.opacity(0.75))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            } else {
-              ProgressView()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black.opacity(0.75))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
+          if let image {
+            Image(nsImage: image)
+              .resizable()
+              .scaledToFit()
+              .padding(10)
+              .frame(maxWidth: .infinity, maxHeight: .infinity)
+          } else {
+            ProgressView()
+              .frame(maxWidth: .infinity, maxHeight: .infinity)
           }
         } placeholder: {
           ProgressView()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.black.opacity(0.75))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
       } else {
         ScrollView {
           Text(item.item.previewableText)
             .font(.body)
+            .foregroundStyle(.primary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .textSelection(.enabled)
-            .padding(14)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black.opacity(0.82))
-        .foregroundStyle(.white)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
       }
     } else {
       Text("shelf_no_selection")
@@ -1698,111 +1767,43 @@ struct ShelfPreviewPopupView: View {
   }
 
   var body: some View {
-    VStack(spacing: 0) {
-      VStack(spacing: 0) {
-        HStack(spacing: 12) {
-          Button {
-            appState.shelfPreview.close()
-          } label: {
-            Image(systemName: "xmark.circle.fill")
-              .font(.title3)
-          }
-          .buttonStyle(.plain)
-          .foregroundStyle(.secondary)
-          .accessibilityLabel("Close")
-          .accessibilityIdentifier("shelf-preview-close")
-
-          Text(LocalizedStringKey(item?.shelfTypeKey ?? "shelf_no_selection"))
-            .font(.headline)
-            .lineLimit(1)
-
-          Spacer(minLength: 0)
-
-          Button {
-            appState.shelfPreview.shareSelection()
-          } label: {
-            Image(systemName: "square.and.arrow.up")
-              .font(.title3)
-          }
-          .buttonStyle(.plain)
-          .disabled(!appState.shelfPreview.canShareSelection)
-          .accessibilityLabel("Share")
-          .accessibilityIdentifier("shelf-preview-share")
-
-          Button {
-            appState.shelfPreview.editSelection()
-          } label: {
-            Text("Edit")
-              .font(.headline)
-          }
-          .buttonStyle(.plain)
-          .disabled(!appState.shelfPreview.canEditSelection)
-          .accessibilityLabel("Edit")
-          .accessibilityIdentifier("shelf-preview-edit")
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-
-        Divider()
-
-        previewContent
-          .padding(14)
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-        Divider()
-
-        HStack {
-          Text(verbatim: footerText)
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-          Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
+    ShelfPopoverShell(pointerX: appState.shelfPreview.pointerX) {
+      Button {
+        appState.shelfPreview.close()
+      } label: {
+        Image(systemName: "xmark")
+          .font(.body.weight(.semibold))
       }
-      .background(.ultraThickMaterial)
-      .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-      .overlay {
-        GeometryReader { geo in
-          let pointerLeft = pointerOffset(totalWidth: geo.size.width)
-          let borderGapWidth = ShelfPreviewLayoutMetrics.pointerWidth
-            - (ShelfPreviewLayoutMetrics.pointerBorderGapInset * 2)
-
-          RoundedRectangle(cornerRadius: 18, style: .continuous)
-            .strokeBorder(.white.opacity(0.26), lineWidth: 1)
-            .overlay(alignment: .topLeading) {
-              Rectangle()
-                .frame(width: borderGapWidth, height: ShelfPreviewLayoutMetrics.pointerBorderGapHeight)
-                .offset(
-                  x: pointerLeft + ShelfPreviewLayoutMetrics.pointerBorderGapInset,
-                  y: geo.size.height - 1
-                )
-                .blendMode(.destinationOut)
-            }
-            .compositingGroup()
-        }
+      .buttonStyle(ShelfPopoverButtonStyle())
+      .accessibilityLabel("Close")
+      .accessibilityIdentifier("shelf-preview-close")
+    } title: {
+      ShelfPopoverTitle(
+        title: Text(LocalizedStringKey(item?.shelfTypeKey ?? "shelf_no_selection")),
+        subtitle: footerText
+      )
+    } trailing: {
+      Button {
+        appState.shelfPreview.shareSelection()
+      } label: {
+        Image(systemName: "square.and.arrow.up")
+          .font(.body.weight(.medium))
       }
+      .buttonStyle(ShelfPopoverButtonStyle())
+      .disabled(!appState.shelfPreview.canShareSelection)
+      .accessibilityLabel("Share")
+      .accessibilityIdentifier("shelf-preview-share")
 
-      GeometryReader { geo in
-        let pointerLeft = pointerOffset(totalWidth: geo.size.width)
-
-        ShelfPreviewPointerShape()
-          .fill(.ultraThickMaterial)
-          .frame(width: ShelfPreviewLayoutMetrics.pointerWidth, height: ShelfPreviewLayoutMetrics.pointerHeight)
-          .overlay {
-            ShelfPreviewPointerOutlineShape()
-              .stroke(
-                .white.opacity(0.26),
-                style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round)
-              )
-          }
-          .offset(x: pointerLeft, y: ShelfPreviewLayoutMetrics.pointerVerticalOffset)
+      Button("Edit") {
+        appState.shelfPreview.editSelection()
       }
-      .frame(height: ShelfPreviewLayoutMetrics.pointerContainerHeight)
+      .buttonStyle(ShelfPopoverButtonStyle(prominent: true))
+      .disabled(!appState.shelfPreview.canEditSelection)
+      .accessibilityLabel("Edit")
+      .accessibilityIdentifier("shelf-preview-edit")
+    } content: {
+      previewContent
     }
-    .padding(ShelfPreviewLayoutMetrics.popupOuterPadding)
-    .background(Color.clear)
     .overlay {
       GeometryReader { geo in
         pointerTipProbe(in: geo.size)
@@ -1837,77 +1838,38 @@ struct ShelfTextEditorPopupView: View {
   }
 
   var body: some View {
-    let chromeColor = Color(nsColor: .windowBackgroundColor).opacity(0.94)
-    let editorBackground = Color(nsColor: .textBackgroundColor)
-
-    VStack(spacing: 0) {
-      HStack(spacing: 12) {
-        Text("Edit Text")
-          .font(.headline)
-          .foregroundStyle(.primary)
-
-        Spacer(minLength: 0)
-
-        Button("Cancel") {
-          appState.shelfPreview.closeEditor()
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Cancel")
-        .accessibilityIdentifier("shelf-text-editor-cancel")
-
-        Button("Save") {
-          appState.shelfPreview.saveTextEditor()
-        }
-        .buttonStyle(.borderedProminent)
-        .keyboardShortcut(.defaultAction)
-        .accessibilityLabel("Save")
-        .accessibilityIdentifier("shelf-text-editor-save")
+    ShelfPopoverShell(pointerX: appState.shelfPreview.editorPointerX) {
+      Button("Cancel") {
+        appState.shelfPreview.closeEditor()
       }
-      .padding(.horizontal, 14)
-      .padding(.vertical, 11)
-      .background(chromeColor)
-
-      Divider()
-
-      ZStack {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
-          .fill(editorBackground)
-
-        TextEditor(
-          text: Binding(
-            get: { appState.shelfPreview.editingText },
-            set: { appState.shelfPreview.updateEditingText($0) }
-          )
+      .buttonStyle(ShelfPopoverButtonStyle())
+      .accessibilityLabel("Cancel")
+      .accessibilityIdentifier("shelf-text-editor-cancel")
+    } title: {
+      ShelfPopoverTitle(title: Text("Edit Text"), subtitle: statsText)
+    } trailing: {
+      Button("Save") {
+        appState.shelfPreview.saveTextEditor()
+      }
+      .buttonStyle(ShelfPopoverButtonStyle(prominent: true))
+      .keyboardShortcut(.defaultAction)
+      .accessibilityLabel("Save")
+      .accessibilityIdentifier("shelf-text-editor-save")
+    } content: {
+      TextEditor(
+        text: Binding(
+          get: { appState.shelfPreview.editingText },
+          set: { appState.shelfPreview.updateEditingText($0) }
         )
-        .font(.body)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .focused($editorFocused)
-        .foregroundStyle(.primary)
-        .background(ShelfTextEditorAppearanceBridge())
-      }
-      .padding(12)
-
-      Divider()
-
-      HStack {
-        Text(verbatim: statsText)
-          .font(.callout)
-          .foregroundStyle(.secondary)
-        Spacer(minLength: 0)
-      }
-      .padding(.horizontal, 14)
-      .padding(.vertical, 9)
-      .background(chromeColor)
+      )
+      .font(.body)
+      .padding(.horizontal, 10)
+      .padding(.vertical, 8)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .focused($editorFocused)
+      .foregroundStyle(.primary)
+      .background(ShelfTextEditorAppearanceBridge())
     }
-    .background(chromeColor)
-    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    .overlay {
-      RoundedRectangle(cornerRadius: 16, style: .continuous)
-        .strokeBorder(.black.opacity(0.08), lineWidth: 0.5)
-    }
-    .padding(6)
     .onAppear {
       DispatchQueue.main.async {
         editorFocused = true
