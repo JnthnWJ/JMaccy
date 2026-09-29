@@ -63,8 +63,6 @@ class HistoryItem {
   var application: String?
   var firstCopiedAt: Date = Date.now
   var lastCopiedAt: Date = Date.now
-  var updatedAt: Date = Date.now
-  var tagAssignmentUpdatedAt: Date = Date.now
   var numberOfCopies: Int = 1
   var pin: String?
   var tag: HistoryTag?
@@ -78,8 +76,6 @@ class HistoryItem {
     self.id = UUID()
     self.firstCopiedAt = firstCopiedAt
     self.lastCopiedAt = lastCopiedAt
-    self.updatedAt = Date.now
-    self.tagAssignmentUpdatedAt = Date.now
     self.contents = contents
   }
 
@@ -231,13 +227,9 @@ class HistoryItem {
       return
     }
 
-    let itemID = id
-    RuntimeDiagnostics.log(
-      "ocr enqueue item=\(itemID.uuidString) imageBytes=\(RuntimeDiagnostics.format(bytes: data.count))"
-    )
     Task { @MainActor [weak self] in
       let recognizedText = await Task.detached(priority: .utility) {
-        Self.recognizeText(in: data, itemID: itemID)
+        Self.recognizeText(in: data)
       }.value
       self?.applyRecognizedText(recognizedText)
     }
@@ -255,13 +247,10 @@ class HistoryItem {
     }
 
     title = recognizedText
-    RuntimeDiagnostics.log("ocr recognized item=\(id.uuidString) titleLength=\(recognizedText.count)")
   }
 
-  private static func recognizeText(in data: Data, itemID: UUID) -> String? {
-    RuntimeDiagnostics.log("ocr start item=\(itemID.uuidString) imageBytes=\(RuntimeDiagnostics.format(bytes: data.count))")
+  private static func recognizeText(in data: Data) -> String? {
     guard let cgImage = NSImage(data: data)?.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-      RuntimeDiagnostics.log("ocr skip item=\(itemID.uuidString) reason=no-cg-image")
       return nil
     }
 
@@ -271,7 +260,6 @@ class HistoryItem {
     do {
       try VNImageRequestHandler(cgImage: cgImage).perform([request])
     } catch {
-      RuntimeDiagnostics.log("ocr failed item=\(itemID.uuidString) error=\(error.localizedDescription)")
       print("Unable to perform the request: \(error).")
       return nil
     }
@@ -279,7 +267,6 @@ class HistoryItem {
     let recognizedStrings = (request.results ?? []).compactMap { observation in
       observation.topCandidates(1).first?.string
     }
-    RuntimeDiagnostics.log("ocr complete item=\(itemID.uuidString) lines=\(recognizedStrings.count)")
     return recognizedStrings.joined(separator: "\n")
   }
 }

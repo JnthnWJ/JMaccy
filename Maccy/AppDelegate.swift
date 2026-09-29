@@ -39,7 +39,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Bridge FloatingPanel via AppDelegate.
     AppState.shared.appDelegate = self
-    LegacyVaultMigration().runIfNeeded()
 
     Clipboard.shared.onNewCopy { History.shared.handleNewClipboardCopy($0) }
     Clipboard.shared.start()

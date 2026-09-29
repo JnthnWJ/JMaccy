@@ -287,9 +287,6 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     previewImageGenerationTask = nil
     Self.thumbnailCache.removeObject(forKey: cacheKey)
     Self.previewCache.removeObject(forKey: cacheKey)
-    RuntimeDiagnostics.log(
-      "image cleanup item=\(id.uuidString) hadThumbnail=\(thumbnailImage != nil) hadPreview=\(previewImage != nil)"
-    )
     thumbnailImage = nil
     previewImage = nil
   }
@@ -326,9 +323,6 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
   }
 
   private static func downsampleInBackground(_ data: Data, toFit size: NSSize, scale: CGFloat) async -> NSImage? {
-    RuntimeDiagnostics.log(
-      "image downsample sourceBytes=\(RuntimeDiagnostics.format(bytes: data.count)) target=\(Int(size.width))x\(Int(size.height))"
-    )
     return await Task.detached(priority: .userInitiated) {
       ImageDownsampler.downsample(data, toFit: size, scale: scale)
     }.value

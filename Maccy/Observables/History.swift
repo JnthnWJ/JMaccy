@@ -177,7 +177,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   @discardableResult
   @MainActor
   func add(_ item: HistoryItem) -> HistoryItemDecorator {
-    item.updatedAt = Date.now
     if #available(macOS 15.0, *) {
       try? History.shared.insertIntoStorage(item)
     } else {
@@ -200,7 +199,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       item.customTitle = existingHistoryItem.customTitle
       item.tag = existingHistoryItem.tag
       item.id = existingHistoryItem.id
-      item.tagAssignmentUpdatedAt = existingHistoryItem.tagAssignmentUpdatedAt
       if !item.fromMaccy {
         item.application = existingHistoryItem.application
       }
@@ -391,7 +389,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     item.item.title = item.item.generateTitle()
     item.title = item.item.title
     item.attributedTitle = nil
-    item.item.updatedAt = Date.now
 
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
@@ -418,7 +415,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     item.item.title = normalizedTitle
     item.title = normalizedTitle
     item.attributedTitle = nil
-    item.item.updatedAt = Date.now
 
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
@@ -457,7 +453,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     item.attributedTitle = nil
     item.cleanupImages()
     item.ensureThumbnailImage()
-    item.item.updatedAt = Date.now
 
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
@@ -620,7 +615,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     guard let item else { return }
 
     item.togglePin()
-    item.item.updatedAt = Date.now
 
     let sortedItems = sorter.sort(all.map(\.item))
     if let currentIndex = all.firstIndex(of: item),
@@ -740,8 +734,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     guard let tag = tags.first(where: { $0.id == tagID }) else { return false }
 
     item.item.tag = tag
-    item.item.updatedAt = Date.now
-    item.item.tagAssignmentUpdatedAt = Date.now
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
     applyCurrentFilters()
@@ -752,8 +744,6 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   @MainActor
   func removeTag(from item: HistoryItemDecorator) {
     item.item.tag = nil
-    item.item.updatedAt = Date.now
-    item.item.tagAssignmentUpdatedAt = Date.now
     Storage.shared.context.processPendingChanges()
     try? Storage.shared.context.save()
     applyCurrentFilters()

@@ -997,7 +997,6 @@ private struct ShelfCardFrameReporter: NSViewRepresentable {
     let view = ReporterView()
     view.itemID = itemID
     view.appState = appState
-    RuntimeDiagnostics.shelfReporterCreated(itemID: itemID)
     logger.debug("reporter makeNSView item=\(itemID)")
     appState.shelfPreview.registerCardAnchor(itemID: itemID, anchor: view)
     return view
@@ -1042,7 +1041,6 @@ private struct ShelfCardFrameReporter: NSViewRepresentable {
     private var windowResizeObserver: NSObjectProtocol?
 
     deinit {
-      RuntimeDiagnostics.shelfReporterDestroyed(itemID: itemID)
       teardown()
     }
 
@@ -1256,7 +1254,6 @@ private struct ShelfWheelBridge: NSViewRepresentable {
     private var clipBoundsObserver: NSObjectProtocol?
     private var windowMoveObserver: NSObjectProtocol?
     private var windowResizeObserver: NSObjectProtocol?
-    private var isDiagnosticsAttached = false
 
     deinit {
       detach()
@@ -1277,10 +1274,6 @@ private struct ShelfWheelBridge: NSViewRepresentable {
       AppState.shared.shelfPreview.bindCarouselClipView(scrollView.contentView)
       configureWindowObservation(window: scrollView.window)
       installMonitor()
-      if !isDiagnosticsAttached {
-        RuntimeDiagnostics.shelfWheelAttached()
-        isDiagnosticsAttached = true
-      }
       notifyViewportDidChange()
     }
 
@@ -1294,10 +1287,6 @@ private struct ShelfWheelBridge: NSViewRepresentable {
       stopObservingWindow()
       AppState.shared.shelfPreview.bindCarouselClipView(nil)
       scrollView = nil
-      if isDiagnosticsAttached {
-        RuntimeDiagnostics.shelfWheelDetached()
-        isDiagnosticsAttached = false
-      }
     }
 
     private func observeClipBounds(of scrollView: NSScrollView) {
