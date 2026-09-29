@@ -266,8 +266,11 @@ private struct ShelfTopStripView: View {
     trailingActionsWidth + 12
   }
 
+  // Room for the selection ring, which extends 3pt beyond each dot.
+  private let dotRailInset: CGFloat = 4
+
   private var dotRailWidth: CGFloat {
-    CGFloat(chips.count * 12 + max(chips.count - 1, 0) * 14)
+    CGFloat(chips.count * 12 + max(chips.count - 1, 0) * 14) + dotRailInset * 2
   }
 
   private func preferredTagRailWidth(_ presentation: TagPresentation) -> CGFloat {
@@ -517,6 +520,7 @@ private struct ShelfTopStripView: View {
                 tagButton(for: chip, presentation: tagPresentation)
               }
             }
+            .padding(.horizontal, tagPresentation == .dotOnly ? dotRailInset : 0)
             .frame(height: 40)
           }
           .frame(width: railWidth, height: 40)
