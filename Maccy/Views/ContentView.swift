@@ -816,14 +816,15 @@ private struct ShelfCardView: View {
   let isSelected: Bool
   let onCardTap: (UUID) -> Void
   @Environment(AppState.self) private var appState
+  @Default(.showHexColorSwatch) private var showHexColorSwatch
 
   var body: some View {
     let hasImage = item.hasImage
     let thumbnailImage = item.thumbnailImage
     let cardTitle = item.shelfDisplayTitle.shortened(to: 80)
     let cardBodyText = item.shelfExcerpt.isEmpty ? cardTitle : item.shelfExcerpt
-    let shelfContentBackgroundColor = item.shelfContentBackgroundColor
-    let shelfContentForegroundColor = item.shelfContentForegroundColor
+    let shelfContentBackgroundColor = showHexColorSwatch ? item.shelfContentBackgroundColor : nil
+    let shelfContentForegroundColor = showHexColorSwatch ? item.shelfContentForegroundColor : nil
     let bodyBackgroundColor = shelfContentBackgroundColor ?? Color(nsColor: .windowBackgroundColor).opacity(0.86)
     let metadataBackgroundColor = shelfContentBackgroundColor ?? Color(nsColor: .windowBackgroundColor).opacity(0.9)
     let bodyTextColor = shelfContentForegroundColor ?? .secondary
@@ -1567,8 +1568,8 @@ struct ShelfPreviewPopupView: View {
       return ""
     }
 
-    if let image = item.item.image {
-      return "\(Int(image.size.width)) x \(Int(image.size.height))"
+    if item.hasImage, let pixelSize = item.item.imagePixelSize {
+      return "\(Int(pixelSize.width))×\(Int(pixelSize.height))"
     }
 
     let stats = textStats
