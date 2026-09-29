@@ -13,8 +13,8 @@
 "copy_modifiers_config" = "• %@ basılıyken seçerek öğeyi kopyalayın.";
 "paste_modifiers_config" = "• %@ basılıyken seçerek öğeyi kopyalayın ve yapıştırın.";
 "format_modifiers_config" = "• %@ basılıyken seçerek öğeyi kopyalayın, biçimlendirmeyi temizleyin ve yapıştırın.";
-"accessibility_alert_message" = "“Maccy”, erişilebilirlik özelliklerini kullanarak bu bilgisayarı denetlemek istiyor.";
-"accessibility_alert_comment" = "Bu uygulamaya, {settings} {pane} bölümünden izin verin.\n\n“+“ düğmesine tıklayın, Maccy'yi seçin ve yanındaki onay kutusunu işaretleyin.";
+"accessibility_alert_message" = "“JMaccy”, erişilebilirlik özelliklerini kullanarak bu bilgisayarı denetlemek istiyor.";
+"accessibility_alert_comment" = "Bu uygulamaya, {settings} {pane} bölümünden izin verin.\n\n“+“ düğmesine tıklayın, JMaccy'yi seçin ve yanındaki onay kutusunu işaretleyin.";
 "accessibility_alert_deny" = "Reddet";
 "accessibility_alert_open" = "Sistem Ayarları'nı Aç";
 "clear_alert_message" = "Geçmişi temizlemek istediğinize emin misiniz?";
@@ -28,7 +28,7 @@
 "system_settings_pane" = "Gizlilik ve Güvenlik";
 "system_preferences_name" = "Sistem Tercihleri";
 "system_preferences_pane" = "Güvenlik ve Gizlilik Tercihleri";
-"status_item_accessibility_label" = "Maccy — pano geçmişi";
+"status_item_accessibility_label" = "JMaccy — pano geçmişi";
 "status_item_disabled_accessibility_suffix" = "duraklatıldı";
 "search_clear_accessibility_label" = "Aramayı temizle";
 "history_item_pin_action" = "İğnele";

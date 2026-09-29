@@ -13,8 +13,8 @@
 "copy_modifiers_config" = "• יש לבחור תוך לחיצה על %@ כדי להעתיק פריט.";
 "paste_modifiers_config" = "• יש לבחור תוך לחיצה על %@ כדי להעתיק ולהדביק פריט.";
 "format_modifiers_config" = "• יש לבחור תוך לחיצה על %@ כדי להעתיק, להסיר עיצוב ולהדביק פריט.";
-"accessibility_alert_message" = "„Maccy” רוצה להשתלט על המחשב הזה דרך יכולות הנגישות.";
-"accessibility_alert_comment" = "הענקת גישה ליישום הזה דרך {pane}, שנמצא תחת {settings}.\n\nלחיצה + כפתור, לבחור ב־Maccy ולהחליף את מצב תיבת הסימון שלידו.";
+"accessibility_alert_message" = "„JMaccy” רוצה להשתלט על המחשב הזה דרך יכולות הנגישות.";
+"accessibility_alert_comment" = "הענקת גישה ליישום הזה דרך {pane}, שנמצא תחת {settings}.\n\nלחיצה + כפתור, לבחור ב־JMaccy ולהחליף את מצב תיבת הסימון שלידו.";
 "accessibility_alert_deny" = "דחייה";
 "accessibility_alert_open" = "פתיחת העדפות המערכת";
 "clear_alert_message" = "לפנות את ההיסטוריה?";
@@ -28,7 +28,7 @@
 "system_settings_pane" = "הגדרות פרטיות ואבטחה";
 "system_preferences_name" = "העדפות מערכת";
 "system_preferences_pane" = "העדפות אבטחה ופרטיות";
-"status_item_accessibility_label" = "Maccy — היסטוריית הלוח";
+"status_item_accessibility_label" = "JMaccy — היסטוריית הלוח";
 "status_item_disabled_accessibility_suffix" = "מושהה";
 "search_clear_accessibility_label" = "ניקוי החיפוש";
 "history_item_pin_action" = "נעיצה";

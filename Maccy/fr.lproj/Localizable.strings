@@ -13,8 +13,8 @@
 "copy_modifiers_config" = "• Selectionnez avec %@ pressé pour copier un élément.";
 "paste_modifiers_config" = "• Selectionnez avec %@ pressé pour copier et coller l'élément.";
 "format_modifiers_config" = "• Selectionnez avec %@ pressé pour copier, reformater et coller l'élément.";
-"accessibility_alert_message" = "“Maccy” souhaite contrôler cet ordinateur en utilisant des fonctions d'accessibilité.";
-"accessibility_alert_comment" = "Accorder les droits à cette application dans le panneau {pane}, situé dans {settings}.\n\nCliquez sur le bouton +, sélectionnez “Maccy“ et cochez la case à côté.";
+"accessibility_alert_message" = "“JMaccy” souhaite contrôler cet ordinateur en utilisant des fonctions d'accessibilité.";
+"accessibility_alert_comment" = "Accorder les droits à cette application dans le panneau {pane}, situé dans {settings}.\n\nCliquez sur le bouton +, sélectionnez “JMaccy“ et cochez la case à côté.";
 "accessibility_alert_deny" = "Refuser";
 "accessibility_alert_open" = "Ouvrir les Préférences Système";
 "clear_alert_message" = "Voulez-vous vraiment effacer l'historique ?";
@@ -28,7 +28,7 @@
 "system_settings_pane" = "Confidentialité et sécurité";
 "system_preferences_name" = "Préférences Système";
 "system_preferences_pane" = "Sécurité & confidentialité";
-"status_item_accessibility_label" = "Maccy — historique du presse-papiers";
+"status_item_accessibility_label" = "JMaccy — historique du presse-papiers";
 "status_item_disabled_accessibility_suffix" = "en pause";
 "search_clear_accessibility_label" = "Effacer la recherche";
 "history_item_pin_action" = "Épingler";

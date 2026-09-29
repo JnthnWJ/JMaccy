@@ -13,8 +13,8 @@
 "copy_modifiers_config" = "• Select with %@ pressed to copy item.";
 "paste_modifiers_config" = "• Select with %@ pressed to copy and paste item.";
 "format_modifiers_config" = "• Select with %@ pressed to copy, clear formatting and paste item.";
-"accessibility_alert_message" = "“Maccy” would like to control this computer using accessibility features.";
-"accessibility_alert_comment" = "Grant access to this application in {pane}, located in {settings}.\n\nClick + button, select Maccy, and toggle on the checkbox next to it.";
+"accessibility_alert_message" = "“JMaccy” would like to control this computer using accessibility features.";
+"accessibility_alert_comment" = "Grant access to this application in {pane}, located in {settings}.\n\nClick + button, select JMaccy, and toggle on the checkbox next to it.";
 "accessibility_alert_deny" = "Deny";
 "accessibility_alert_open" = "Open System Preferences";
 "clear_alert_message" = "Are you sure you want to clear the history?";
@@ -61,7 +61,7 @@
 "shelf_item_rename_placeholder" = "Title";
 "shelf_item_rename_save" = "Save";
 "shelf_item_rename_error_empty" = "Title cannot be empty.";
-"status_item_accessibility_label" = "Maccy — clipboard history";
+"status_item_accessibility_label" = "JMaccy — clipboard history";
 "status_item_disabled_accessibility_suffix" = "paused";
 "search_clear_accessibility_label" = "Clear search";
 "history_item_pin_action" = "Pin";

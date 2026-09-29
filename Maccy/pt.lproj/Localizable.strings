@@ -13,8 +13,8 @@
 "copy_modifiers_config" = "• Selecione com %@ pressionado para copiar o elemento.";
 "paste_modifiers_config" = "• Selecione com %@ pressionado para copiar e colar o elemento.";
 "format_modifiers_config" = "• Selecione com %@ pressionado para copiar, limpar a formatação e colar o elemento.";
-"accessibility_alert_message" = "“Maccy” gostaria de controlar este computador usando as funções de acessibilidade.";
-"accessibility_alert_comment" = "Conceda acesso a esta aplicação em {pane}, localizado em {settings}.\n\nClique o botão +, selecione Maccy e ative a caixa de seleção próxima dele.";
+"accessibility_alert_message" = "“JMaccy” gostaria de controlar este computador usando as funções de acessibilidade.";
+"accessibility_alert_comment" = "Conceda acesso a esta aplicação em {pane}, localizado em {settings}.\n\nClique o botão +, selecione JMaccy e ative a caixa de seleção próxima dele.";
 "accessibility_alert_deny" = "Negar";
 "accessibility_alert_open" = "Abrir Ajustes do Sistema";
 "clear_alert_message" = "Tem certeza de que deseja limpar o histórico?";
@@ -28,7 +28,7 @@
 "system_settings_pane" = "Privacidade e Segurança";
 "system_preferences_name" = "Preferências do Sistema";
 "system_preferences_pane" = "Configurações de Privacidade e Segurança";
-"status_item_accessibility_label" = "Maccy — histórico da área de transferência";
+"status_item_accessibility_label" = "JMaccy — histórico da área de transferência";
 "status_item_disabled_accessibility_suffix" = "em pausa";
 "search_clear_accessibility_label" = "Limpar pesquisa";
 "history_item_pin_action" = "Fixar";

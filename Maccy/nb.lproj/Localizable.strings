@@ -13,8 +13,8 @@
 "copy_modifiers_config" = "• Velg med %@ nedtrykket for å kopiere element.";
 "paste_modifiers_config" = "• Velg med %@ nedtrykket for å kopiere og lime inn element.";
 "format_modifiers_config" = "• Velg med %@ nedtrykket for å kopiere, slette formattering og lime inn element.";
-"accessibility_alert_message" = "“Maccy” vil ha adgang til denne datamaskinen for tjenester tilknyttet tilgjengelighet.";
-"accessibility_alert_comment" = "Gi tillatelse til dette programmet i {pane} innstillingene, lokalisert i {settings}.\n\nKlikk på +-knappen, velg “Maccy“ og velg avmerkingsboksen ved siden av.";
+"accessibility_alert_message" = "“JMaccy” vil ha adgang til denne datamaskinen for tjenester tilknyttet tilgjengelighet.";
+"accessibility_alert_comment" = "Gi tillatelse til dette programmet i {pane} innstillingene, lokalisert i {settings}.\n\nKlikk på +-knappen, velg “JMaccy“ og velg avmerkingsboksen ved siden av.";
 "accessibility_alert_deny" = "Avslå";
 "accessibility_alert_open" = "Åpne System Valg";
 "clear_alert_message" = "Er du sikker på at du vil tømme historikken?";
@@ -32,7 +32,7 @@
 "system_settings_pane" = "Personvern og sikkerhet";
 "system_preferences_name" = "System Valg";
 "system_preferences_pane" = "Sikkerhet & Personvern";
-"status_item_accessibility_label" = "Maccy — utklippstavlehistorikk";
+"status_item_accessibility_label" = "JMaccy — utklippstavlehistorikk";
 "status_item_disabled_accessibility_suffix" = "satt på pause";
 "search_clear_accessibility_label" = "Tøm søk";
 "history_item_pin_action" = "Fest";

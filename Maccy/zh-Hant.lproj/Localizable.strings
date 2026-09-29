@@ -13,8 +13,8 @@
 "copy_modifiers_config" = "• 按住 %@ 並選取以拷貝所選項目。";
 "paste_modifiers_config" = "• 按住 %@ 並選取以貼上所選項目。";
 "format_modifiers_config" = "• 按住 %@ 並選取以拷貝所選項目的格式設定。";
-"accessibility_alert_message" = "「Maccy「想要使用「輔助功能」控制此 Mac。";
-"accessibility_alert_comment" = "在{settings}中的{pane}頁面中授權此應用程式。\n\n按下 + 按鈕，選擇 Maccy 並勾選旁邊的核取方塊。";
+"accessibility_alert_message" = "「JMaccy「想要使用「輔助功能」控制此 Mac。";
+"accessibility_alert_comment" = "在{settings}中的{pane}頁面中授權此應用程式。\n\n按下 + 按鈕，選擇 JMaccy 並勾選旁邊的核取方塊。";
 "accessibility_alert_deny" = "拒絕";
 "accessibility_alert_open" = "開啟系統偏好設定";
 "clear_alert_message" = "確定要清除歷史記錄嗎？";
@@ -28,7 +28,7 @@
 "system_settings_pane" = "「隱私權與安全性」";
 "system_preferences_name" = "「系統偏好設定」";
 "system_preferences_pane" = "「安全性和隱私權」";
-"status_item_accessibility_label" = "Maccy — 剪貼簿歷史記錄";
+"status_item_accessibility_label" = "JMaccy — 剪貼簿歷史記錄";
 "status_item_disabled_accessibility_suffix" = "已暫停";
 "search_clear_accessibility_label" = "清除搜尋";
 "history_item_pin_action" = "固定";

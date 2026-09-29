@@ -13,8 +13,8 @@
 "copy_modifiers_config" = "• هەڵبژێرە لەگەڵ پەنجەدانان لەسەر %@ بۆ کۆپیکردنی ئایتەمەکە.";
 "paste_modifiers_config" = "• هەڵبژێرە لەگەڵ پەنجەدانان لەسەر %@ بۆ کۆپی و پاستکردنی ئایتەمەکە.";
 "format_modifiers_config" = "• هەڵبژێرە لەگەڵ پەنجەدانان لەسەر %@ بۆ کۆپیکردن، پاککردنەوەی فۆرمات و پاستکردنی ئایتەمەکە.";
-"accessibility_alert_message" = "“Maccy” دەیەوێت کۆنترۆڵی ئەم کۆمپیوتەرە بکات بە بەکارهێنانی تایبەتمەندییە دەستڕاگەیشتنەکان.";
-"accessibility_alert_comment" = "دەستڕاگەیشتن بدە بەم ئەپلیکەیشنە لە {pane}، کە لە {settings} دایە.\n\nکلیک لەسەر دوگمەی +، Maccy هەڵبژێرە، و سندوقچەکەی تەنیشتی چالاک بکە.";
+"accessibility_alert_message" = "“JMaccy” دەیەوێت کۆنترۆڵی ئەم کۆمپیوتەرە بکات بە بەکارهێنانی تایبەتمەندییە دەستڕاگەیشتنەکان.";
+"accessibility_alert_comment" = "دەستڕاگەیشتن بدە بەم ئەپلیکەیشنە لە {pane}، کە لە {settings} دایە.\n\nکلیک لەسەر دوگمەی +، JMaccy هەڵبژێرە، و سندوقچەکەی تەنیشتی چالاک بکە.";
 "accessibility_alert_deny" = "ڕەتکردنەوە";
 "accessibility_alert_open" = "کردنەوەی رێکخستنەکانی سیستەم";
 "clear_alert_message" = "دڵنیایت دەتەوێت مێژووەکە پاک بکەیتەوە؟";
@@ -28,7 +28,7 @@
 "system_settings_pane" = "رێکخستنەکانی تایبەتێتی و ئاسایش";
 "system_preferences_name" = "هەڵبژاردەکانی سیستەم";
 "system_preferences_pane" = "هەڵبژاردەکانی ئاسایش و تایبەتێti";
-"status_item_accessibility_label" = "Maccy — مێژووی کلیپبۆرد";
+"status_item_accessibility_label" = "JMaccy — مێژووی کلیپبۆرد";
 "status_item_disabled_accessibility_suffix" = "ڕاگیراوە";
 "search_clear_accessibility_label" = "گەڕان پاک بکەرەوە";
 "history_item_pin_action" = "چەسپاندن";
