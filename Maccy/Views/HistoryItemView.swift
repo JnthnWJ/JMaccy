@@ -59,7 +59,8 @@ struct HistoryItemView: View {
     }
     .accessibilityIdentifier("copy-history-item")
     .buttonAction(performSelect)
-    .onAppear {
+    // Keyed to the decorator so a re-created item with the same id still gets its thumbnail.
+    .task(id: ObjectIdentifier(item)) {
       item.ensureThumbnailImage()
     }
     .accessibilityAction(named: Text(item.isPinned ? "history_item_unpin_action" : "history_item_pin_action")) {

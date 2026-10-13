@@ -868,6 +868,7 @@ private struct ShelfCardView: View {
   let isSelected: Bool
   let onCardTap: (UUID) -> Void
   @Environment(AppState.self) private var appState
+  @Environment(\.displayScale) private var displayScale
   @Default(.showHexColorSwatch) private var showHexColorSwatch
 
   var body: some View {
@@ -895,6 +896,9 @@ private struct ShelfCardView: View {
               .font(.caption)
               .opacity(0.85)
           }
+          // Workaround for macOS 26 rendering this text upside down, same as ListItemTitleView.
+          // https://github.com/p0deje/Maccy/issues/1113
+          .drawingGroup()
 
           Spacer(minLength: 0)
 
@@ -921,12 +925,23 @@ private struct ShelfCardView: View {
 
                 Image(nsImage: image)
                   .resizable()
+                  .interpolation(image.interpolation(forRenderedWidth: containerWidth, scale: displayScale))
                   // Keep the top of screenshots visible; crop from the bottom when needed.
                   .frame(width: containerWidth, height: renderedImageHeight, alignment: .top)
                   .frame(width: containerWidth, height: geometry.size.height, alignment: .top)
+              } else if item.thumbnailImageUnavailable {
+                Image(systemName: "photo.badge.exclamationmark")
+                  .font(.title)
+                  .foregroundStyle(.secondary)
+                  .frame(maxWidth: .infinity, maxHeight: .infinity)
               } else {
                 ProgressView()
                   .frame(maxWidth: .infinity, maxHeight: .infinity)
+                  // Runs whenever the placeholder shows, including after the thumbnail was purged or
+                  // the item was re-created under the same id (e.g. copying the same image again).
+                  .task(id: ObjectIdentifier(item)) {
+                    item.ensureThumbnailImage()
+                  }
               }
             }
               .clipped()
@@ -1031,9 +1046,6 @@ private struct ShelfCardView: View {
         appState.shelfPreview.share(item: item)
       }
       .disabled(!appState.shelfPreview.canShare(item: item))
-    }
-    .onAppear {
-      item.ensureThumbnailImage()
     }
   }
 }
@@ -1678,6 +1690,7 @@ private struct ShelfPopoverTitle: View {
 
 struct ShelfPreviewPopupView: View {
   @Environment(AppState.self) private var appState
+  @Environment(\.displayScale) private var displayScale
 
   private var item: HistoryItemDecorator? {
     appState.navigator.leadHistoryItem
@@ -1739,19 +1752,32 @@ struct ShelfPreviewPopupView: View {
           await item.asyncGetPreviewImage()
         } content: { image in
           if let image {
-            Image(nsImage: image)
-              .resizable()
-              .scaledToFit()
-              .padding(10)
-              .frame(maxWidth: .infinity, maxHeight: .infinity)
+            GeometryReader { geometry in
+              let available = CGSize(width: max(geometry.size.width - 20, 1), height: max(geometry.size.height - 20, 1))
+              let fitRatio = min(
+                available.width / max(image.size.width, 1),
+                available.height / max(image.size.height, 1)
+              )
+
+              Image(nsImage: image)
+                .resizable()
+                .interpolation(image.interpolation(forRenderedWidth: image.size.width * fitRatio, scale: displayScale))
+                .scaledToFit()
+                .padding(10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
           } else {
-            ProgressView()
+            Image(systemName: "photo.badge.exclamationmark")
+              .font(.largeTitle)
+              .foregroundStyle(.secondary)
               .frame(maxWidth: .infinity, maxHeight: .infinity)
           }
         } placeholder: {
           ProgressView()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        // AsyncView loads once per identity, so key it to the item to reload when the selection moves.
+        .id(item.id)
       } else {
         ScrollView {
           Text(item.item.previewableText)

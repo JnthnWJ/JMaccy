@@ -8,6 +8,7 @@ class HistoryItemDecoratorTests: XCTestCase {
   let boldFont = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
   let savedHighlightMatch = Defaults[.highlightMatch]
   let savedImageMaxHeight = Defaults[.imageMaxHeight]
+  let savedPopupLayoutMode = Defaults[.popupLayoutMode]
 
   var firstCopiedAt: Date! {
     let formatter = DateFormatter()
@@ -25,11 +26,13 @@ class HistoryItemDecoratorTests: XCTestCase {
     super.setUp()
     Defaults[.highlightMatch] = .bold
     Defaults[.imageMaxHeight] = 40
+    Defaults[.popupLayoutMode] = .list
   }
 
   override func tearDown() {
     super.tearDown()
     Defaults[.imageMaxHeight] = savedImageMaxHeight
+    Defaults[.popupLayoutMode] = savedPopupLayoutMode
     Defaults[.highlightMatch] = savedHighlightMatch
   }
 
@@ -155,6 +158,21 @@ class HistoryItemDecoratorTests: XCTestCase {
     let itemDecorator = historyItemDecorator(image)
     itemDecorator.sizeImages()
     XCTAssertEqual(itemDecorator.thumbnailImage!.size, NSSize(width: 40, height: 40))
+  }
+
+  func testShelfThumbnailFitsCardWidthInsteadOfMaxHeight() throws {
+    guard #available(macOS 26.0, *) else {
+      throw XCTSkip("Shelf layout requires macOS 26")
+    }
+
+    Defaults[.popupLayoutMode] = .shelf
+    let image = NSImage(named: "NSApplicationIcon")!
+    let itemDecorator = historyItemDecorator(image)
+    itemDecorator.sizeImages()
+    XCTAssertEqual(
+      itemDecorator.thumbnailImage!.size.width,
+      HistoryItemDecorator.shelfThumbnailImageSize.width
+    )
   }
 
   func testFile() {

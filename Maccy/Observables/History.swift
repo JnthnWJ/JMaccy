@@ -117,6 +117,15 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
         }
       }
     }
+
+    // Shelf and list layouts use differently sized thumbnails.
+    Task {
+      for await _ in Defaults.updates(.popupLayoutMode, initial: false) {
+        for item in all {
+          await item.cleanupImages()
+        }
+      }
+    }
   }
 
   @MainActor

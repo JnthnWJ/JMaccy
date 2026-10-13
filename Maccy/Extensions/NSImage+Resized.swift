@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import SwiftUI
 
 enum ImageDownsampler {
   /// Returns a copy of the image encoded in `data` that fits into `bounds` (in points).
@@ -87,6 +88,20 @@ enum ImageDownsampler {
 }
 
 extension NSImage {
+  /// Interpolation for drawing the image `renderedWidth` points wide on a display with `scale`.
+  ///
+  /// Small images (pixel art, cropped UI) get blurry when smoothed while blown up, so keep their
+  /// pixels sharp once they're magnified at least 2x. Everything else is smoothed.
+  func interpolation(forRenderedWidth renderedWidth: CGFloat, scale: CGFloat) -> Image.Interpolation {
+    let pixelsWide = representations.map(\.pixelsWide).max() ?? 0
+    let sourceWidth = pixelsWide > 0 ? CGFloat(pixelsWide) : size.width * max(scale, 1)
+    guard sourceWidth > 0 else {
+      return .high
+    }
+
+    return renderedWidth * max(scale, 1) / sourceWidth >= 2 ? .none : .high
+  }
+
   /// Draws the image into a standalone bitmap of the given size, dropping any reference to the source.
   func rasterized(to newSize: NSSize, scale: CGFloat) -> NSImage? {
     let pixelsWide = max(1, Int((newSize.width * max(scale, 1)).rounded()))

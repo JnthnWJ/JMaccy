@@ -51,7 +51,16 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
   }
 
   static var previewImageSize: NSSize { NSScreen.forPopup?.visibleFrame.size ?? NSSize(width: 2048, height: 1536) }
-  static var thumbnailImageSize: NSSize { NSSize(width: 340, height: Defaults[.imageMaxHeight]) }
+  // Shelf cards draw images at the full card width and crop from the bottom, so their thumbnails are
+  // bounded by that width rather than by the list's row height. The height cap keeps very tall
+  // screenshots from decoding at full length.
+  static let shelfThumbnailImageSize = NSSize(width: 260, height: 1_300)
+  static var thumbnailImageSize: NSSize {
+    if AppState.shared.shelfModeEnabled {
+      return shelfThumbnailImageSize
+    }
+    return NSSize(width: 340, height: Defaults[.imageMaxHeight])
+  }
 
   var id: UUID { item.id }
 
@@ -101,6 +110,8 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
   var thumbnailImageGenerationTask: Task<(), Error>?
   var previewImage: NSImage?
   var thumbnailImage: NSImage?
+  // Set when the image data is missing or can't be decoded, so views can stop showing a spinner.
+  private(set) var thumbnailImageUnavailable = false
   var applicationImage: ApplicationImage
 
   // 10k characters seems to be more than enough on large displays
@@ -252,10 +263,11 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
 
   @MainActor
   func ensureThumbnailImage() {
-    guard thumbnailImage == nil, thumbnailImageGenerationTask == nil else {
+    guard thumbnailImage == nil, thumbnailImageGenerationTask == nil, !thumbnailImageUnavailable else {
       return
     }
     guard let data = item.imageData else {
+      thumbnailImageUnavailable = true
       return
     }
 
@@ -269,6 +281,7 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
       }
 
       self.thumbnailImageGenerationTask = nil
+      self.thumbnailImageUnavailable = image == nil
       self.storeThumbnailImage(image)
     }
   }
@@ -315,6 +328,7 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     Self.thumbnailCache.removeObject(forKey: cacheKey)
     Self.previewCache.removeObject(forKey: cacheKey)
     thumbnailImage = nil
+    thumbnailImageUnavailable = false
     previewImage = nil
   }
 
