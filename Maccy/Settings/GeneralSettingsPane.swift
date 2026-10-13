@@ -169,6 +169,11 @@ struct GeneralSettingsPane: View {
       }
 
       Settings.Section(title: "") {
+        Defaults.Toggle(key: .playSounds) {
+          Text("PlaySounds", tableName: "GeneralSettings")
+        }
+        .fixedSize()
+
         if let notificationsURL = notificationsURL {
           Link(destination: notificationsURL, label: {
             Text("NotificationsAndSounds", tableName: "GeneralSettings")

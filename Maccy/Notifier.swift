@@ -1,4 +1,5 @@
 import AppKit
+import Defaults
 import UserNotifications
 
 class Notifier {
@@ -40,7 +41,7 @@ class Notifier {
     center.add(request) { error in
       if let error {
         NSLog("Failed to deliver notification: \(error)")
-      } else if settings.soundSetting == .enabled {
+      } else if Defaults[.playSounds], settings.soundSetting == .enabled {
         sound?.play()
       }
     }
