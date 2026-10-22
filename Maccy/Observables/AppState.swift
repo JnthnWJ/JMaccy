@@ -1248,6 +1248,9 @@ class AppState: Sendable {
 
   @MainActor
   func openPreferences() { // swiftlint:disable:this function_body_length
+    // Release the nonactivating panel's keyboard focus before activating a regular window.
+    popup.close()
+
     if settingsWindowController == nil {
       let generalTitle = NSLocalizedString("Title", tableName: "GeneralSettings", comment: "")
       let storageTitle = NSLocalizedString("Title", tableName: "StorageSettings", comment: "")
@@ -1320,7 +1323,8 @@ class AppState: Sendable {
       )
     }
     settingsWindowController?.show()
-    settingsWindowController?.window?.orderFrontRegardless()
+    NSApp.activate(ignoringOtherApps: true)
+    settingsWindowController?.window?.makeKeyAndOrderFront(nil)
   }
 
   func quit() {

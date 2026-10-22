@@ -51,6 +51,7 @@ struct GeneralSettingsPane: View {
         })
           .help(Text("OpenTooltip", tableName: "GeneralSettings"))
           .accessibilityLabel(Text("Open", tableName: "GeneralSettings"))
+          .accessibilityIdentifier("open-shortcut-recorder")
       }
 
       Settings.Section(label: { Text("Pin", tableName: "GeneralSettings") }) {

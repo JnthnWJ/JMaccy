@@ -93,6 +93,69 @@ class MaccyUITests: XCTestCase {
     assertExists(items[copy2])
   }
 
+  func testPreferencesTakeFocusFromFinder() throws {
+    try assertPreferencesTakeFocusFromFinder()
+  }
+
+  func testShelfPreferencesTakeFocusFromFinder() throws {
+    try skipIfShelfUnavailable()
+    setPopupLayoutMode("shelf")
+    try assertPreferencesTakeFocusFromFinder()
+  }
+
+  private func assertPreferencesTakeFocusFromFinder() throws {
+    let finder = try XCTUnwrap(NSRunningApplication.runningApplications(
+      withBundleIdentifier: "com.apple.finder"
+    ).first)
+    // Exercise both the initial window creation and reopening the cached controller.
+    for _ in 0..<2 {
+      finder.activate(options: [])
+      expectation(for: NSPredicate { _, _ in finder.isActive }, evaluatedWith: nil)
+      waitForExpectations(timeout: 3)
+      popUpWithMouse()
+
+      // Post real keyboard events so XCTest does not activate JMaccy for us.
+      postKey(CGKeyCode(kVK_ANSI_Comma), flags: .maskCommand)
+
+      expectation(for: NSPredicate { _, _ in
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.jnthnwj.JMaccy"
+      }, evaluatedWith: nil)
+      waitForExpectations(timeout: 3)
+
+      let settings = app.windows.firstMatch
+      assertExists(settings)
+      assertNotExists(items[copy1])
+      settings.toolbars.buttons["General"].click()
+
+      let recorder = settings.descendants(matching: .any).matching(
+        NSPredicate(format: "identifier == %@", "open-shortcut-recorder")
+      ).firstMatch
+      assertExists(recorder)
+      recorder.click()
+      expectation(
+        for: NSPredicate(format: "placeholderValue == %@", "Press Shortcut"), evaluatedWith: recorder
+      )
+      waitForExpectations(timeout: 3)
+      // Escape must reach the recorder and end recording without changing the user's shortcut.
+      postKey(CGKeyCode(kVK_Escape), flags: [])
+      expectation(
+        for: NSPredicate(format: "placeholderValue == %@", "Record Shortcut"), evaluatedWith: recorder
+      )
+      waitForExpectations(timeout: 3)
+
+      settings.buttons[XCUIIdentifierCloseWindow].click()
+      assertNotExists(settings)
+    }
+  }
+
+  private func postKey(_ keyCode: CGKeyCode, flags: CGEventFlags) {
+    for keyDown in [true, false] {
+      let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: keyDown)
+      event?.flags = flags
+      event?.post(tap: .cghidEventTap)
+    }
+  }
+
   func testCloseWithHotkey() throws {
     popUpWithMouse()
     assertExists(items[copy1])
