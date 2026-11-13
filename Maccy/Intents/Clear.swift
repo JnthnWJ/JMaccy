@@ -5,7 +5,7 @@ struct Clear: AppIntent, CustomIntentMigratedAppIntent {
   static let intentClassName = "ClearIntent"
 
   static var title: LocalizedStringResource = "Clear Clipboard History"
-  static var description = IntentDescription("Clears all JMaccy clipboard history except for pinned items.")
+  static var description = IntentDescription("Clears unpinned, untagged items from JMaccy clipboard history.")
 
   static var parameterSummary: some ParameterSummary {
     Summary("Clear Clipboard History")

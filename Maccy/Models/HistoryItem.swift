@@ -73,6 +73,8 @@ class HistoryItem {
   var title = ""
   var customTitle: String?
 
+  var countsTowardHistoryLimit: Bool { pin == nil && tag == nil }
+
   @Relationship(deleteRule: .cascade, inverse: \HistoryItemContent.item)
   var contents: [HistoryItemContent] = []
 

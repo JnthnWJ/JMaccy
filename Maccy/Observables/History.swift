@@ -169,9 +169,9 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
   @MainActor
   private func limitHistorySize(to maxSize: Int) {
-    let unpinned = all.filter(\.isUnpinned)
-    if unpinned.count >= maxSize {
-      unpinned[maxSize...].forEach(delete)
+    let limitedItems = all.filter { $0.item.countsTowardHistoryLimit }
+    if limitedItems.count > maxSize {
+      limitedItems[maxSize...].forEach(delete)
     }
   }
 
@@ -223,9 +223,9 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       }
     }
 
-    // Remove exceeding items. Do this after the item is added to avoid removing something
-    // if a duplicate was found as then the size already stayed the same.
-    limitHistorySize(to: Defaults[.size] - 1)
+    // Make room after merging any duplicate, once the incoming item has inherited its pin and tag.
+    let reservedSlots = item.countsTowardHistoryLimit ? 1 : 0
+    limitHistorySize(to: Defaults[.size] - reservedSlots)
 
     sessionLog[Clipboard.shared.changeCount] = item
 
@@ -286,19 +286,16 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   func clear() {
     withLogging("Clearing history") {
       let descriptor = FetchDescriptor<HistoryItem>(
-        predicate: #Predicate { $0.pin == nil }
+        predicate: #Predicate { $0.pin == nil && $0.tag == nil }
       )
       let storedItems = (try? Storage.shared.context.fetch(descriptor)) ?? []
 
-      all.filter(\.isUnpinned).forEach { cleanup($0) }
-      all.removeAll(where: \.isUnpinned)
-      sessionLog.removeValues { $0.pin == nil }
+      all.filter { $0.item.countsTowardHistoryLimit }.forEach(cleanup)
+      all.removeAll { $0.item.countsTowardHistoryLimit }
+      sessionLog.removeValues(where: \.countsTowardHistoryLimit)
       applyCurrentFilters()
 
-      for item in storedItems {
-        item.tag = nil
-        deleteFromStorage(item)
-      }
+      storedItems.forEach(deleteFromStorage)
       Storage.shared.context.processPendingChanges()
       try? Storage.shared.context.save()
       Storage.shared.purgeOrphanedContents()

@@ -217,10 +217,13 @@ class HistoryTests: XCTestCase { // swiftlint:disable:this type_body_length
     XCTAssertEqual(history.items[0].text, "bar")
   }
 
-  func testClearingUnpinned() throws {
+  func testClearingKeepsPinnedAndTaggedItems() throws {
     let pinned = history.add(historyItem("foo"))
     pinned.togglePin()
     history.add(historyItem("bar"))
+    let tagged = history.add(historyItem("tagged"))
+    let work = try XCTUnwrap(history.createTag(name: "Work", color: .blue))
+    XCTAssertTrue(history.assignTag(tagID: work.id, toItemID: tagged.id))
     let orphan = HistoryItemContent(
       type: NSPasteboard.PasteboardType.string.rawValue,
       value: "orphan".data(using: .utf8)
@@ -230,8 +233,8 @@ class HistoryTests: XCTestCase { // swiftlint:disable:this type_body_length
 
     history.clear()
 
-    XCTAssertEqual(history.items, [pinned])
-    try assertStorageCounts(items: 1, contents: 1)
+    XCTAssertEqual(Set(history.items.map(\.id)), Set([pinned.id, tagged.id]))
+    try assertStorageCounts(items: 2, contents: 2)
   }
 
   func testClearingAll() throws {
@@ -279,6 +282,44 @@ class HistoryTests: XCTestCase { // swiftlint:disable:this type_body_length
     XCTAssertFalse(history.items.contains(items[1]))
   }
 
+  func testMaxSizeIgnoresTaggedItemsAndTaggedCopies() throws {
+    Defaults[.size] = 1
+    let tagged = history.add(historyItem("tagged"))
+    let taggedID = tagged.id
+    let work = try XCTUnwrap(history.createTag(name: "Work", color: .blue))
+    XCTAssertTrue(history.assignTag(tagID: work.id, toItemID: taggedID))
+
+    history.add(historyItem("older"))
+    let latest = history.add(historyItem("latest"))
+    XCTAssertEqual(history.items, [latest, tagged])
+
+    let copied = history.add(historyItem("tagged"))
+    XCTAssertEqual(copied.id, taggedID)
+    XCTAssertEqual(copied.item.tag?.id, work.id)
+    XCTAssertEqual(history.items, [latest, copied])
+    try assertStorageCounts(items: 2, contents: 2)
+  }
+
+  func testLoadKeepsTaggedItemsUntilTagIsRemoved() async throws {
+    let tagged = history.add(historyItem("tagged"))
+    let work = try XCTUnwrap(history.createTag(name: "Work", color: .blue))
+    XCTAssertTrue(history.assignTag(tagID: work.id, toItemID: tagged.id))
+    history.add(historyItem("older"))
+    let latest = history.add(historyItem("latest"))
+
+    Defaults[.size] = 1
+    try await history.load()
+
+    XCTAssertEqual(history.items, [latest, tagged])
+    try assertStorageCounts(items: 2, contents: 2)
+
+    history.removeTag(from: tagged)
+    try await history.load()
+
+    XCTAssertEqual(history.items, [latest])
+    try assertStorageCounts(items: 1, contents: 1)
+  }
+
   func testMaxSizeIsChanged() {
     var items: [HistoryItemDecorator] = []
     for index in 0...10 {
@@ -293,32 +334,25 @@ class HistoryTests: XCTestCase { // swiftlint:disable:this type_body_length
   }
 
   func testReaddingBottomMostPinnedItemAtFullCapacity() {
-    // Regression test for a crash when re-copying (invoking) the bottom-most
-    // pinned item while history is at full capacity and pins are sorted to the
-    // bottom. The stale insert index used to trap with an out-of-bounds insert.
+    // A stale insert index previously caused a crash when re-copying a bottom-most pin at capacity.
     // Issue link: https://github.com/p0deje/Maccy/issues/1466
-    // `pinTo` is restored to its default value(.top) in `tearDown`.
     Defaults[.pinTo] = .bottom
 
-    // Pin an item; `history.togglePin` re-sorts `all`, so with `.bottom` the
-    // pinned item ends up as the last element.
     let pinned = history.add(historyItem("pinned"))
     history.togglePin(pinned)
 
-    // Fill unpinned history to full capacity.
     for index in 0..<Defaults[.size] {
       history.add(historyItem(String(index)))
     }
 
     XCTAssertEqual(history.all.last, pinned)
+    let unpinned = history.unpinnedItems
 
-    // Re-copy the pinned item. It is detected as a duplicate, removed and
-    // re-inserted while `limitHistorySize` trims an exceeding unpinned item.
-    // Before the fix this inserted at a stale, out-of-bounds index and crashed.
     let readded = history.add(historyItem("pinned"))
 
-    XCTAssertTrue(history.all.contains(readded))
-    XCTAssertEqual(history.all.filter(\.isPinned).count, 1)
+    XCTAssertEqual(history.all.last, readded)
+    XCTAssertEqual(history.pinnedItems, [readded])
+    XCTAssertEqual(history.unpinnedItems, unpinned)
   }
 
   func testRemoving() throws {
