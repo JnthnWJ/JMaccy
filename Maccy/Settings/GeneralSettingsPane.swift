@@ -158,10 +158,17 @@ struct GeneralSettingsPane: View {
         .onChange(refreshModifiers)
         .fixedSize()
 
-        Text(String(
-          format: NSLocalizedString("Modifiers", tableName: "GeneralSettings", comment: ""),
-          copyModifier, pasteModifier, pasteWithoutFormatting
-        ))
+        VStack(alignment: .leading, spacing: 6) {
+          Text(String(
+            localized: "PasteWithoutFormattingShortcut",
+            defaultValue: "Press ⌘↩ to paste the highlighted item without formatting.",
+            table: "GeneralSettings"
+          ))
+          Text(String(
+            format: NSLocalizedString("Modifiers", tableName: "GeneralSettings", comment: ""),
+            copyModifier, pasteModifier, pasteWithoutFormatting
+          ))
+        }
         .fixedSize(horizontal: false, vertical: true)
         .foregroundStyle(.gray)
         .controlSize(.small)

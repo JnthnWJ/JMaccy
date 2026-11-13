@@ -39,9 +39,10 @@ struct KeyHandlingView<Content: View>: View {
     let shelfMode = appState.shelfModeEnabled
     let firstResponder = NSApp.keyWindow?.firstResponder
 
-    // Let the shelf search handle Escape even when its field editor is the first responder.
+    // Let the search field editor handle text input and let popup shortcuts act on results.
     let closesShelfSearch = shelfMode && searchFocused && keyChord == .close
-    if firstResponder is NSTextView, keyChord != .renameCurrentItem, !closesShelfSearch {
+    let pastesSearchResult = searchFocused && keyChord == .pasteCurrentItemWithoutFormatting
+    if firstResponder is NSTextView, keyChord != .renameCurrentItem, !closesShelfSearch, !pastesSearchResult {
       return false
     }
 
@@ -221,6 +222,12 @@ struct KeyHandlingView<Content: View>: View {
       return true
     case .selectCurrentItem:
       appState.select(flags: .currentModifierFlags)
+      return true
+    case .pasteCurrentItemWithoutFormatting:
+      guard let panel = appState.appDelegate?.panel, NSApp.keyWindow === panel else { return false }
+      if !appState.navigator.selection.isEmpty {
+        appState.select(flags: HistoryItemAction.pasteWithoutFormatting.modifierFlags)
+      }
       return true
     case .moveToLeft:
       guard shelfMode else {

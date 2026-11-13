@@ -603,6 +603,34 @@ class MaccyUITests: XCTestCase {
     assertPasteboardStringEquals(copy2)
   }
 
+  func testReturnPasteShortcutsWhileSearching() {
+    let text = "formatted"
+    let richText = NSAttributedString(string: text, attributes: [.font: NSFont.boldSystemFont(ofSize: 14)])
+    let rtf = richText.rtf(from: NSRange(location: 0, length: richText.length), documentAttributes: [:])
+    pasteboard.clearContents()
+    pasteboard.setString(text, forType: .string)
+    pasteboard.setData(rtf, forType: .rtf)
+    waitTillClipboardCheck()
+    copyToClipboard(copy3)
+
+    popUpWithMouse()
+    search(text)
+    assertExists(items[text])
+    app.typeKey(.return, modifierFlags: [])
+    assertPasteboardStringEquals(text)
+    assertPasteboardDataEquals(rtf, forType: .rtf)
+    assertPopupDismissed()
+
+    copyToClipboard(copy3)
+    popUpWithMouse()
+    search(text)
+    assertExists(items[text])
+    app.typeKey(.return, modifierFlags: .command)
+    assertPasteboardStringEquals(text)
+    XCTAssertNil(pasteboard.data(forType: .rtf))
+    assertPopupDismissed()
+  }
+
   func testCopyWithCommandShortcut() {
     popUpWithMouse()
     app.typeKey("2", modifierFlags: [.command])

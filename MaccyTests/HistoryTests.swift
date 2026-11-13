@@ -1,5 +1,6 @@
 import AppKit
 import Defaults
+import Sauce
 import SwiftData
 import XCTest
 @testable import Maccy
@@ -42,6 +43,16 @@ class HistoryTests: XCTestCase { // swiftlint:disable:this type_body_length
 
   func testDefaultIsEmpty() {
     XCTAssertEqual(history.items, [])
+  }
+
+  func testReturnPasteShortcuts() {
+    XCTAssertTrue(Defaults.Keys.pasteByDefault.defaultValue)
+    XCTAssertFalse(Defaults.Keys.removeFormattingByDefault.defaultValue)
+
+    for key in [Key.return, .keypadEnter] {
+      XCTAssertEqual(KeyChord(key, []), .selectCurrentItem)
+      XCTAssertEqual(KeyChord(key, .command), .pasteCurrentItemWithoutFormatting)
+    }
   }
 
   func testAdding() {

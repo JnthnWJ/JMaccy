@@ -43,6 +43,7 @@ enum KeyChord: CaseIterable {
   case openPreferences
   case pinOrUnpin
   case selectCurrentItem
+  case pasteCurrentItemWithoutFormatting
   case close
   case togglePreview
   case renameCurrentItem
@@ -130,6 +131,9 @@ enum KeyChord: CaseIterable {
       self = .focusSearch
     case (.comma, [.command]):
       self = .openPreferences
+    case (.return, [.command]),
+         (.keypadEnter, [.command]):
+      self = .pasteCurrentItemWithoutFormatting
     case (.return, _),
          (.keypadEnter, _):
       self = .selectCurrentItem

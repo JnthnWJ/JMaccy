@@ -54,7 +54,7 @@ Build and run the `Maccy` target in Xcode.
 
 1. Press <kbd>SHIFT (⇧)</kbd> + <kbd>COMMAND (⌘)</kbd> + <kbd>C</kbd> to open JMaccy.
 2. Type to search clipboard history.
-3. Press <kbd>ENTER</kbd> to copy selected item, or <kbd>OPTION (⌥)</kbd> + <kbd>ENTER</kbd> to paste it.
+3. Highlight an item and press <kbd>RETURN</kbd> to paste it or <kbd>COMMAND (⌘)</kbd> + <kbd>RETURN</kbd> to paste it without formatting. **Paste automatically** is on by default.
 4. Use <kbd>OPTION (⌥)</kbd> + <kbd>P</kbd> to pin/unpin.
 5. In Shelf mode, use tags to group and filter items.
 
